@@ -35,6 +35,24 @@ class DeviceSession:
         self.client = self._new_client()
         self._keepalive: asyncio.Task | None = None
         self._lock = asyncio.Lock()
+        # Coalesce duplicate high-level operations: a second poweron while one
+        # is already running joins the in-flight task instead of launching a
+        # parallel connect+WoL loop (which otherwise floods the network — the
+        # storm that tripped a transient EACCES during the first cutover).
+        self._inflight: dict[str, asyncio.Task] = {}
+
+    @property
+    def busy(self) -> bool:
+        return bool(self._inflight)
+
+    def _coalesce(self, key: str, coro_factory):
+        existing = self._inflight.get(key)
+        if existing is not None and not existing.done():
+            return existing
+        task = asyncio.ensure_future(coro_factory())
+        self._inflight[key] = task
+        task.add_done_callback(lambda _t, k=key: self._inflight.pop(k, None))
+        return task
 
     def _new_client(self) -> SsapClient:
         return SsapClient(
@@ -56,8 +74,9 @@ class DeviceSession:
 
     async def connect(self, *, wake: bool = False, attempts: int | None = None) -> None:
         """Connect (and register) with retry/backoff. wake=True sends WoL
-        before the first attempt and again on every retry — a WiFi TV waking
-        from standby misses early packets while its radio re-associates."""
+        before the first attempt and on alternate retries — a WiFi TV waking
+        from standby misses early packets while its radio re-associates, but
+        re-sending on every attempt just floods the LAN with broadcasts."""
         async with self._lock:
             if self.client.connected:
                 return
@@ -75,12 +94,13 @@ class DeviceSession:
                 except (OSError, ConnectionError, TimeoutError) as e:
                     last_err = e
                 if attempt < attempts:
-                    if wake:
+                    if wake and attempt % 2 == 1:   # 1st, 3rd, 5th… retry only
                         self._wol()
                     delay = min(self.cfg.backoff_max,
                                 self.cfg.backoff_base * 2 ** (attempt - 1))
-                    log.info("%s: attempt %d/%d failed (%s) — retrying in %.0fs",
-                             self.cfg.id, attempt, attempts, last_err, delay)
+                    log.info("%s: attempt %d/%d failed (%s: %r) — retrying in %.0fs",
+                             self.cfg.id, attempt, attempts,
+                             type(last_err).__name__, str(last_err), delay)
                     await asyncio.sleep(delay)
             raise ConnectionError(
                 f"{self.cfg.id}: unreachable after {attempts} attempts: {last_err}")
@@ -128,10 +148,26 @@ class DeviceSession:
                 await self.client.close()
                 return
 
-    # -- high-level actions ---------------------------------------------------
+    # -- high-level actions (coalesced: on/unblank share the "on" slot, and
+    #    off/blank share "off", so redundant concurrent requests join a single
+    #    in-flight operation instead of each running its own WoL+connect loop) -
 
     async def power_on(self, *, timeout: float | None = None,
                        set_input: bool = True) -> str:
+        return await self._coalesce(
+            "on", lambda: self._power_on(timeout=timeout, set_input=set_input))
+
+    async def power_off(self, *, force: bool = False) -> str:
+        return await self._coalesce("off", lambda: self._power_off(force=force))
+
+    async def blank(self) -> str:
+        return await self._coalesce("off", self._blank)
+
+    async def unblank(self) -> str:
+        return await self._coalesce("on", self._unblank)
+
+    async def _power_on(self, *, timeout: float | None = None,
+                        set_input: bool = True) -> str:
         if self.dry_run:
             log.info("[dry-run] %s: would power ON (+input hdmi%s)",
                      self.cfg.id, self.cfg.set_hdmi_input if set_input else "-")
@@ -146,7 +182,7 @@ class DeviceSession:
         await self.settle()
         return state.value
 
-    async def power_off(self, *, force: bool = False) -> str:
+    async def _power_off(self, *, force: bool = False) -> str:
         if self.dry_run:
             log.info("[dry-run] %s: would power OFF (guard=%s)",
                      self.cfg.id, self.cfg.check_hdmi_input_when_powering_off)
@@ -163,7 +199,7 @@ class DeviceSession:
         await self.disconnect()
         return "off" if done else "refused-wrong-input"
 
-    async def blank(self) -> str:
+    async def _blank(self) -> str:
         if self.dry_run:
             log.info("[dry-run] %s: would BLANK screen", self.cfg.id)
             return "dry-run"
@@ -177,7 +213,7 @@ class DeviceSession:
         await self.settle()
         return "blanked" if done else "refused-wrong-input"
 
-    async def unblank(self) -> str:
+    async def _unblank(self) -> str:
         if self.dry_run:
             log.info("[dry-run] %s: would UNBLANK screen", self.cfg.id)
             return "dry-run"

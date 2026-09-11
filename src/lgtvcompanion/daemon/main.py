@@ -85,8 +85,11 @@ class Daemon:
         if report.get("activity") or report.get("input_event"):
             if self.idle_engine is not None:
                 self.idle_engine.notify_activity()
-            # only key presses wake an off TV; pointer noise shouldn't
-            if report.get("key", True) and self.wake_on_input is not None:
+            # only key presses wake an off TV; pointer noise shouldn't. Skip if
+            # a power operation is already in flight, else a slow/failing wake
+            # keeps re-triggering (the TV reads "unreachable" mid-connect).
+            if (report.get("key", True) and self.wake_on_input is not None
+                    and not any(s.busy for s in self.sessions)):
                 self.wake_on_input.notify_input()
 
     async def _on_topology_change(self, present_keys: set[str]) -> None:
