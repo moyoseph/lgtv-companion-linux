@@ -270,11 +270,7 @@ def build_luna_setting(cmd: Command, args: list[Any]) -> tuple[str, dict]:
     {"gameMode": {"hdmi1": value}}.
     """
     assert cmd.luna_category and cmd.luna_setting
-    value: Any = args[0]
-    if cmd.luna_format == "int":
-        value = int(value)
-    else:
-        value = str(value)
+    value: Any = int(args[0]) if cmd.luna_format == "int" else str(args[0])
     setting = cmd.luna_setting
     if "_hdmi" in setting:
         base, _, num = setting.partition("_hdmi")

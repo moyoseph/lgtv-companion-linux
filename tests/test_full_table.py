@@ -97,7 +97,7 @@ async def test_button_command_via_session(tv, tmp_path):
     from .test_session_and_ipc import make_session
     s = make_session(tv, tmp_path)
     # fake TV has no pointer socket endpoint -> expect a clean error, not a hang
-    with pytest.raises(Exception):
+    with pytest.raises((ConnectionError, OSError)):
         await s.execute(lookup("button"), ["HOME"])
     await s.disconnect()
 
