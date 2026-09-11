@@ -75,8 +75,28 @@ class Agent:
                 with contextlib.suppress(asyncio.QueueFull):
                     self._send_queue.put_nowait(dict(state))
 
+    def _start_sunshine_watch(self) -> None:
+        from .streams import SunshineWatcher, find_sunshine_log
+        path = config_mod.find_config()
+        configured = "auto"
+        if path is not None:
+            try:
+                configured = config_mod.load(path).global_.remote_stream.sunshine_log
+            except (ValueError, OSError):
+                pass
+        log_path = find_sunshine_log(configured)
+        if log_path is None:
+            log.info("no sunshine.log found — stream detection off")
+            return
+        def on_change(streaming: bool) -> None:
+            with contextlib.suppress(asyncio.QueueFull):
+                self._send_queue.put_nowait({"streaming": streaming})
+        self._sunshine = SunshineWatcher(log_path, on_change)
+        self._sunshine.start()
+
     async def run(self) -> None:
         self._monitor.start()
+        self._start_sunshine_watch()
         state_task = asyncio.create_task(self._state_loop())
         try:
             while True:

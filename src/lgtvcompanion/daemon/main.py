@@ -19,6 +19,8 @@ from .idle import IdleEngine
 from .network import wait_for_network
 from .power_events import PowerEvents
 from .server import IpcServer
+from .streams import StreamController
+from .topology import TopologyWatcher
 from .vetoes import VetoEngine
 from .wake import WakeOnInput
 
@@ -43,6 +45,10 @@ class Daemon:
                 is_tv_reachable=self._any_tv_reachable,
                 wake=self._wake_all,
                 cooldown_s=cfg.global_.wake_on_input.cooldown_s)
+        self.streams = StreamController(cfg.global_.remote_stream, self._managed)
+        self.topology: TopologyWatcher | None = None
+        if cfg.global_.topology.enabled:
+            self.topology = TopologyWatcher(self._on_topology_change)
         self.vetoes = VetoEngine(cfg.global_.idle)
         self.idle_engine: IdleEngine | None = None
         if cfg.global_.idle.enabled:
@@ -72,12 +78,31 @@ class Daemon:
     def _on_report(self, report: dict) -> None:
         if "mpris_playing" in report or "fullscreen" in report:
             self.vetoes.update_agent_state(report)
+        if "streaming" in report:
+            handler = (self.streams.on_connect if report["streaming"]
+                       else self.streams.on_disconnect)
+            asyncio.get_running_loop().create_task(handler("agent"))
         if report.get("activity") or report.get("input_event"):
             if self.idle_engine is not None:
                 self.idle_engine.notify_activity()
             # only key presses wake an off TV; pointer noise shouldn't
             if report.get("key", True) and self.wake_on_input is not None:
                 self.wake_on_input.notify_input()
+
+    async def _on_topology_change(self, present_keys: set[str]) -> None:
+        for s in self._managed():
+            key = s.cfg.unique_display_key
+            if not key:
+                continue
+            try:
+                if key in present_keys:
+                    result = await s.power_on()
+                else:
+                    result = await s.power_off()
+                log.info("%s: topology %s -> %s", s.cfg.id,
+                         "present" if key in present_keys else "absent", result)
+            except Exception as e:
+                log.error("%s: topology action failed: %s", s.cfg.id, e)
 
     async def _idle_blank(self) -> None:
         self.server.broadcast("SYSTEM_USER_IDLE")
@@ -194,10 +219,10 @@ class Daemon:
                 return {"idle": "released"}
             self.server.broadcast("SYSTEM_USER_BUSY")
             return {s.cfg.id: await s.unblank() for s in sessions}
-        if action in ("streaming_connect", "streaming_disconnect"):
-            # remote-stream reactions land in v0.3; expose the hook now
-            log.info("external streaming signal: %s", action)
-            return {"streaming": action}
+        if action == "streaming_connect":
+            return await self.streams.on_connect("cli")
+        if action == "streaming_disconnect":
+            return await self.streams.on_disconnect("cli")
         if action == "clear_log":
             return {"log": "journald-managed; use journalctl --vacuum-*"}
         raise ValueError(f"unhandled meta action {action!r}")
@@ -215,6 +240,8 @@ class Daemon:
             self.wake_on_input.start()
         if self.idle_engine is not None:
             self.idle_engine.start()
+        if self.topology is not None:
+            self.topology.start()
         sdnotify.ready()
         sdnotify.status("running" + (" (dry-run)" if self.dry_run else ""))
         if self.dry_run:
@@ -223,6 +250,8 @@ class Daemon:
         await self._stopping.wait()
         sdnotify.stopping()
         # plain service stop (upgrade/restart): do not touch TV power
+        if self.topology is not None:
+            self.topology.stop()
         if self.idle_engine is not None:
             self.idle_engine.stop()
         if self.wake_on_input is not None:

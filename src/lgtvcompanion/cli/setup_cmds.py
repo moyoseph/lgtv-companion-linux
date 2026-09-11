@@ -225,6 +225,42 @@ def cmd_rollback_legacy(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_map_display(args: argparse.Namespace) -> int:
+    from ..daemon.topology import connected_displays
+    displays = connected_displays()
+    if not displays:
+        print("no connected displays with EDID found under /sys/class/drm")
+        return 1
+    print("connected displays:")
+    for connector, key in displays.items():
+        marker = "  <- LG" if key.startswith("GSM") else ""
+        print(f"  {connector}: {key}{marker}")
+    if not args.device:
+        print("\nassign one with: lgtvc setup map-display --device tv1 [--key <key>]")
+        return 0
+    key = args.key
+    if key is None:
+        lg = [k for k in displays.values() if k.startswith("GSM")]
+        if len(lg) != 1:
+            print(f"{'no' if not lg else 'several'} LG display(s) found — "
+                  "pass --key explicitly")
+            return 1
+        key = lg[0]
+    cfg_path = config_mod.find_config()
+    if cfg_path is None:
+        sys.exit("no config found")
+    cfg = config_mod.load(cfg_path)
+    dev = cfg.device(args.device)
+    if dev is None:
+        sys.exit(f"unknown device {args.device!r}")
+    dev.unique_display_key = key
+    config_mod.save(cfg, cfg_path)
+    print(f"{args.device}: unique_display_key = {key}")
+    print("enable the feature with global.topology.enabled = true, then "
+          "restart lgtvc-daemon")
+    return 0
+
+
 def cmd_show(args: argparse.Namespace) -> int:
     path = config_mod.find_config()
     if path is None:
@@ -267,6 +303,12 @@ def main(argv: list[str]) -> int:
     p = sub.add_parser("rollback-legacy", help="switch back to the legacy units")
     p.add_argument("--legacy-user", default=os.environ.get("SUDO_USER") or None)
     p.set_defaults(func=cmd_rollback_legacy)
+
+    p = sub.add_parser("map-display",
+                       help="list connected displays / bind one to a device")
+    p.add_argument("--device")
+    p.add_argument("--key")
+    p.set_defaults(func=cmd_map_display)
 
     p = sub.add_parser("show", help="print the active config")
     p.set_defaults(func=cmd_show)
