@@ -237,3 +237,120 @@ def import_legacy(legacy_dir: Path = LEGACY_DIR, *, device_id: str = "tv1") -> t
     client_key = key_file.read_text().strip() if key_file.exists() else None
 
     return Config(devices=[dev]), client_key
+
+
+# Windows virtual-key codes -> evdev key codes (media keys only; anything
+# else in IgnoredKeysList is dropped with a warning)
+_VK_TO_EVDEV = {
+    173: 113,  # VK_VOLUME_MUTE  -> KEY_MUTE
+    174: 114,  # VK_VOLUME_DOWN  -> KEY_VOLUMEDOWN
+    175: 115,  # VK_VOLUME_UP    -> KEY_VOLUMEUP
+    176: 163,  # VK_MEDIA_NEXT   -> KEY_NEXTSONG
+    177: 165,  # VK_MEDIA_PREV   -> KEY_PREVIOUSSONG
+    178: 166,  # VK_MEDIA_STOP   -> KEY_STOPCD
+    179: 164,  # VK_MEDIA_PLAY   -> KEY_PLAYPAUSE
+}
+
+_WOL_METHOD = {1: "broadcast", 2: "directed", 3: "subnet", 4: "auto"}
+_PERSISTENT = {0: "off", 1: "keep_open", 2: "keepalive"}
+_END_MODE = {0: "on", 1: "keep_off", 2: "restore"}
+
+
+def import_windows(path: Path) -> tuple[Config, dict[str, str]]:
+    """Convert an upstream LGTV Companion config.json.
+
+    Returns (config, {device_id: session_key}). Session keys go to the key
+    store, never into our config file. Windows-only settings (NicLuid,
+    TimingShutdown, UpdaterMode, locale word lists, VWL flags) are dropped —
+    their Linux replacements are automatic (see docs/parity.md).
+    """
+    data = json.loads(path.read_text())
+    prefs = data.get("LGTV Companion", {})
+    cfg = Config()
+    keys: dict[str, str] = {}
+
+    g = cfg.global_
+    if isinstance(prefs.get("PowerOnTimeOut"), int):
+        g.power_on_timeout = max(5, min(100, prefs["PowerOnTimeOut"]))
+    if isinstance(prefs.get("BlankWhenIdle"), bool):
+        g.idle.enabled = prefs["BlankWhenIdle"]
+    if isinstance(prefs.get("BlankWhenIdleDelay"), int):
+        g.idle.minutes = max(1, min(240, prefs["BlankWhenIdleDelay"]))
+    if isinstance(prefs.get("MuteSpeakers"), bool):
+        g.idle.mute_speakers = prefs["MuteSpeakers"]
+    if isinstance(prefs.get("BlankWhenIdleFullscreenDisable"), bool):
+        g.idle.veto_fullscreen = prefs["BlankWhenIdleFullscreenDisable"]
+    if isinstance(prefs.get("ExternalAPI"), bool):
+        g.external_api = prefs["ExternalAPI"]
+    if isinstance(prefs.get("RemoteStream"), bool):
+        g.remote_stream.enabled = prefs["RemoteStream"]
+    if isinstance(prefs.get("RemoteStreamPowerOff"), bool):
+        g.remote_stream.on_connect = "off" if prefs["RemoteStreamPowerOff"] else "blank"
+    if isinstance(prefs.get("RemoteStreamEndMode"), int):
+        g.remote_stream.on_disconnect = _END_MODE.get(
+            prefs["RemoteStreamEndMode"], "on")
+    if isinstance(prefs.get("AdhereDisplayTopology"), bool):
+        g.topology.enabled = prefs["AdhereDisplayTopology"]
+    if isinstance(prefs.get("KeepTopologyOnBoot"), bool):
+        g.topology.keep_on_boot = prefs["KeepTopologyOnBoot"]
+    for vk in prefs.get("IgnoredKeysList", []) or []:
+        if vk in _VK_TO_EVDEV:
+            g.idle.ignored_keys.append(_VK_TO_EVDEV[vk])
+        else:
+            log.warning("import-windows: ignored key VK=%s has no evdev mapping "
+                        "— dropped", vk)
+    process_list = prefs.get("BlankWhenIdleProcessList", {}) or {}
+    for friendly, entry in process_list.items():
+        binary = entry.get("Binary", "")
+        if not binary:
+            continue
+        flags = [f.lower() for f in
+                 ("Running", "Fullscreen", "Foreground", "VideoWakeLock")
+                 if entry.get(f)]
+        g.idle.process_list.append(
+            {"match": binary.lower(), "flags": flags or ["running"],
+             "comment": friendly})
+
+    for node, value in data.items():
+        if node == "LGTV Companion" or not isinstance(value, dict):
+            continue
+        dev = DeviceConfig(id=node.lower(), host=value.get("IP", ""))
+        name = value.get("Name", "")
+        dev.name = name.removeprefix("[LG] webOS TV ") or node
+        mac = value.get("MAC")
+        dev.mac = [mac] if isinstance(mac, str) else list(mac or [])
+        if isinstance(value.get("Enabled"), bool):
+            dev.enabled = value["Enabled"]
+        if isinstance(value.get("NewSockConnect"), bool):
+            dev.ssl = value["NewSockConnect"]
+        dev.wol_method = _WOL_METHOD.get(value.get("WOL", 4), "auto")
+        subnet = value.get("Subnet")
+        dev.subnet = subnet if isinstance(subnet, str) and subnet else "auto"
+        dev.persistent_connection = _PERSISTENT.get(
+            value.get("PersistentConnectionLevel", 0), "off")
+        src = value.get("SourceHdmiInput") or value.get(
+            "OnlyTurnOffIfCurrentHDMIInputNumberIs")
+        if isinstance(src, int):
+            dev.source_hdmi_input = max(1, min(4, src))
+        check = value.get("CheckHdmiInputWhenPoweringOff",
+                          value.get("HDMIinputcontrol"))
+        if isinstance(check, bool):
+            dev.check_hdmi_input_when_powering_off = check
+        set_input = value.get("SetHdmiInput", value.get("SetHDMIInputOnResume"))
+        if set_input:
+            n = value.get("SetHDMIInputOnResumeToNumber", dev.source_hdmi_input)
+            if isinstance(n, int):
+                dev.set_hdmi_input = max(1, min(4, n))
+        if isinstance(value.get("SetHdmiInputDelay"), int):
+            dev.set_hdmi_input_delay = max(0, min(30, value["SetHdmiInputDelay"]))
+        if isinstance(value.get("UniqueDeviceKey"), str):
+            dev.unique_display_key = value["UniqueDeviceKey"]
+        if value.get("NicLuid"):
+            log.warning("import-windows: %s: NicLuid dropped — set 'interface' "
+                        "to a NIC name if you need source binding", node)
+        session_key = value.get("SessionKey")
+        if isinstance(session_key, str) and session_key:
+            keys[dev.id] = session_key
+        cfg.devices.append(dev)
+
+    return cfg, keys

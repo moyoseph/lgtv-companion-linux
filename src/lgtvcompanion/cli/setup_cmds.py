@@ -138,6 +138,26 @@ def cmd_import_legacy(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_import_windows(args: argparse.Namespace) -> int:
+    src = Path(args.file)
+    if not src.exists():
+        sys.exit(f"{src} not found")
+    cfg, keys = config_mod.import_windows(src)
+    target = (config_mod.SYSTEM_CONFIG if os.geteuid() == 0
+              else config_mod.user_config_path())
+    config_mod.save(cfg, target)
+    print(f"wrote {target} ({len(cfg.devices)} device(s))")
+    state = (config_mod.SYSTEM_STATE if os.geteuid() == 0
+             else config_mod.user_state_path())
+    store = KeyStore(state / "keys")
+    for device_id, key in keys.items():
+        store.save(device_id, key)
+        print(f"session key imported for {device_id}")
+    if not keys:
+        print("no session keys in the file — run: lgtvc setup pair")
+    return 0
+
+
 def cmd_pair(args: argparse.Namespace) -> int:
     cfg_path = config_mod.find_config()
     if args.host:
@@ -227,6 +247,11 @@ def main(argv: list[str]) -> int:
     p = sub.add_parser("import-legacy", help="import /etc/lgtvcontrol settings")
     p.add_argument("--legacy-dir", default=str(config_mod.LEGACY_DIR))
     p.set_defaults(func=cmd_import_legacy)
+
+    p = sub.add_parser("import-windows",
+                       help="import an upstream LGTV Companion config.json")
+    p.add_argument("--file", required=True)
+    p.set_defaults(func=cmd_import_windows)
 
     p = sub.add_parser("pair", help="pair with a TV (shows a prompt on the TV)")
     p.add_argument("--device", default="tv1")
