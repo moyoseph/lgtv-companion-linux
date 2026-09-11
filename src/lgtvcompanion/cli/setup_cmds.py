@@ -100,7 +100,8 @@ PartOf=graphical-session.target
 After=graphical-session.target
 
 [Service]
-ExecStart={agent_bin}
+# python -m, not the console script — same reason as the daemon unit
+ExecStart={python_bin} -m lgtvcompanion.agent.main
 Restart=on-failure
 RestartSec=5
 
@@ -119,7 +120,7 @@ After=graphical-session.target
 
 [Service]
 ExecCondition=/bin/sh -c 'busctl --user list --no-legend | grep -q StatusNotifierWatcher'
-ExecStart={tray_bin}
+ExecStart={python_bin} -m lgtvcompanion.tray.app
 Restart=on-failure
 RestartSec=10
 
@@ -147,6 +148,15 @@ def _python_bin() -> str:
     return sys.executable
 
 
+def _tray_available(python_bin: str) -> bool:
+    try:
+        subprocess.run([python_bin, "-c", "import PySide6"],
+                       check=True, capture_output=True)
+        return True
+    except (subprocess.CalledProcessError, OSError):
+        return False
+
+
 def _run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
     print(f"+ {' '.join(cmd)}")
     return subprocess.run(cmd, check=check, capture_output=False)
@@ -169,18 +179,22 @@ def cmd_install(args: argparse.Namespace) -> int:
         python_bin=python_bin, config_path=config_path))
     USER_UNIT_DIR.mkdir(parents=True, exist_ok=True)
     (USER_UNIT_DIR / AGENT_UNIT).write_text(AGENT_UNIT_TEMPLATE.format(
-        agent_bin=_bin("lgtvc-agent")))
-    tray_bin = Path(sys.argv[0]).resolve().parent / "lgtvc-tray"
-    if tray_bin.exists():
+        python_bin=python_bin))
+    # tray unit only if PySide6 is importable (the [tray] extra is installed)
+    tray_available = _tray_available(python_bin)
+    if tray_available:
         (USER_UNIT_DIR / TRAY_UNIT).write_text(TRAY_UNIT_TEMPLATE.format(
-            tray_bin=tray_bin))
+            python_bin=python_bin))
     _run(["systemctl", "--global", "enable", AGENT_UNIT], check=False)
     _run(["systemctl", "daemon-reload"])
     print(f"installed {DAEMON_UNIT}, {SHUTDOWN_UNIT} (not enabled) "
           f"and {AGENT_UNIT} (user, globally enabled)")
-    if tray_bin.exists():
+    if tray_available:
         print(f"tray unit installed — enable per user with: "
               f"systemctl --user enable --now {TRAY_UNIT}")
+    else:
+        print("tray not installed (PySide6 missing) — "
+              "pip install 'lgtvcompanion[tray]' then re-run setup install")
     print("next: lgtvc setup import-legacy   (or: lgtvc setup pair --host <tv-ip>)")
     return 0
 
