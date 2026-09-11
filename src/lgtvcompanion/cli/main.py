@@ -7,7 +7,8 @@ Syntax (upstream-compatible):
 Commands are case-insensitive, several may appear per invocation, trailing
 bare tokens select devices by id/name (none = all configured devices).
 
-Extras: `lgtvc events` (print the SYSTEM_* stream), `lgtvc setup …`,
+Extras: `lgtvc status` / `lgtvc reload` (daemon state / re-read config),
+`lgtvc events` (print the SYSTEM_* stream), `lgtvc setup …`,
 `--direct` (bypass the daemon and speak SSAP straight to the TVs),
 `--host/--key` for ad-hoc use against an unconfigured TV.
 """
@@ -209,6 +210,24 @@ async def run_direct(inv: Invocation, cfg: config_mod.Config | None,
     return status
 
 
+async def run_daemon_verb(verb: str, socket_path: str) -> int:
+    """`lgtvc status` / `lgtvc reload` — daemon-only verbs, printed as JSON."""
+    if not os.path.exists(socket_path):
+        print("error: daemon not running", file=sys.stderr)
+        return 1
+    client = ipc.IpcClient(socket_path)
+    await client.connect()
+    try:
+        resp = await client.request(verb, [], [])
+    finally:
+        await client.close()
+    if not resp.get("ok"):
+        print(f"error: {resp.get('error')}", file=sys.stderr)
+        return 1
+    print(format_result(resp.get("results"), "friendly"))
+    return 0
+
+
 async def run_events(socket_path: str) -> int:
     client = ipc.IpcClient(socket_path)
     await client.connect()
@@ -256,6 +275,10 @@ def main(argv: list[str] | None = None) -> None:
 
     if rest and rest[0] == "events":
         raise SystemExit(asyncio.run(run_events(_socket_path(opts.socket))))
+
+    if rest and rest[0] in ("status", "reload"):
+        raise SystemExit(asyncio.run(
+            run_daemon_verb(rest[0], _socket_path(opts.socket))))
 
     if not rest or rest[0] in ("-help", "--help", "-h"):
         print_help()
