@@ -229,7 +229,20 @@ def main(argv: list[str] | None = None) -> None:
     pre.add_argument("--key")
     pre.add_argument("--socket")
     pre.add_argument("--config")
+    pre.add_argument("--wait-network", action="store_true",
+                     help="wait for the network before acting (resume path)")
     opts, rest = pre.parse_known_args(argv)
+
+    if opts.wait_network:
+        from ..daemon.network import wait_for_network
+        cfg_probe = config_mod.Path(opts.config) if opts.config \
+            else config_mod.find_config()
+        host = opts.host
+        if host is None and cfg_probe and config_mod.Path(cfg_probe).exists():
+            devs = config_mod.load(config_mod.Path(cfg_probe)).devices
+            host = devs[0].host if devs else None
+        if host:
+            asyncio.run(wait_for_network(host))
 
     if rest and rest[0] == "events":
         raise SystemExit(asyncio.run(run_events(_socket_path(opts.socket))))

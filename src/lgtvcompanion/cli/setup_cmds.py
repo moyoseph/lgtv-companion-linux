@@ -16,6 +16,7 @@ from ..ssap.handshake import KeyStore
 
 DAEMON_UNIT = "lgtvc-daemon.service"
 SHUTDOWN_UNIT = "lgtvc-shutdown.service"
+SLEEP_UNIT = "lgtvc-sleep.service"
 SYSTEM_UNIT_DIR = Path("/etc/systemd/system")
 
 DAEMON_UNIT_TEMPLATE = """\
@@ -39,8 +40,9 @@ StandardError=journal
 WantedBy=multi-user.target
 """
 
-# Reboot leaves the TV on; only poweroff/halt pull this in. Idempotent with the
-# daemon's logind path — powering off an already-off TV is a no-op.
+# Reboot leaves the TV on; only poweroff/halt pull this in (Conflicts=reboot
+# gives deterministic reboot-vs-shutdown). systemd waits for this oneshot
+# before proceeding, so no daemon inhibitor is needed.
 SHUTDOWN_UNIT_TEMPLATE = """\
 [Unit]
 Description=Power off LG TV on shutdown (not reboot)
@@ -51,12 +53,35 @@ Before=poweroff.target halt.target
 [Service]
 Type=oneshot
 ExecStart={cli_bin} --direct --config {config_path} -poweroff
-TimeoutStartSec=10
+TimeoutStartSec=15
 StandardOutput=journal
 StandardError=journal
 
 [Install]
 WantedBy=poweroff.target halt.target
+"""
+
+# Suspend/resume via sleep.target ordering (the proven legacy pattern):
+# ExecStart (off) runs and systemd WAITS for it before suspending; ExecStop
+# (on) runs at resume. Short-lived processes, so no inhibitor/EACCES issue.
+SLEEP_UNIT_TEMPLATE = """\
+[Unit]
+Description=Power off LG TV on suspend, on at resume
+Before=sleep.target
+StopWhenUnneeded=yes
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart={cli_bin} --direct --config {config_path} -poweroff
+ExecStop={cli_bin} --direct --config {config_path} --wait-network -poweron
+TimeoutStartSec=15
+TimeoutStopSec=45
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=sleep.target
 """
 
 AGENT_UNIT = "lgtvc-agent.service"
@@ -128,6 +153,8 @@ def cmd_install(args: argparse.Namespace) -> int:
     (SYSTEM_UNIT_DIR / DAEMON_UNIT).write_text(DAEMON_UNIT_TEMPLATE.format(
         daemon_bin=_bin("lgtvc-daemon"), config_path=config_path, user_line=user_line))
     (SYSTEM_UNIT_DIR / SHUTDOWN_UNIT).write_text(SHUTDOWN_UNIT_TEMPLATE.format(
+        cli_bin=_bin("lgtvc"), config_path=config_path))
+    (SYSTEM_UNIT_DIR / SLEEP_UNIT).write_text(SLEEP_UNIT_TEMPLATE.format(
         cli_bin=_bin("lgtvc"), config_path=config_path))
     USER_UNIT_DIR.mkdir(parents=True, exist_ok=True)
     (USER_UNIT_DIR / AGENT_UNIT).write_text(AGENT_UNIT_TEMPLATE.format(
@@ -232,7 +259,7 @@ def cmd_migrate_legacy(args: argparse.Namespace) -> int:
     if args.legacy_user:
         _run(["systemctl", "--machine", f"{args.legacy_user}@.host", "--user",
               "disable", "--now", LEGACY_USER_UNIT], check=False)
-    _run(["systemctl", "enable", DAEMON_UNIT, SHUTDOWN_UNIT])
+    _run(["systemctl", "enable", DAEMON_UNIT, SHUTDOWN_UNIT, SLEEP_UNIT])
     # restart (not just enable --now): a running daemon must reload the
     # config now that dry_run flipped off
     _run(["systemctl", "restart", DAEMON_UNIT])
@@ -244,7 +271,8 @@ def cmd_migrate_legacy(args: argparse.Namespace) -> int:
 def cmd_rollback_legacy(args: argparse.Namespace) -> int:
     if os.geteuid() != 0:
         sys.exit("needs root")
-    _run(["systemctl", "disable", "--now", DAEMON_UNIT, SHUTDOWN_UNIT], check=False)
+    _run(["systemctl", "disable", "--now", DAEMON_UNIT, SHUTDOWN_UNIT, SLEEP_UNIT],
+         check=False)
     for unit in LEGACY_UNITS:
         _run(["systemctl", "enable", "--now", unit], check=False)
     if args.legacy_user:

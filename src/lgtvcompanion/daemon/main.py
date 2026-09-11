@@ -17,7 +17,7 @@ from ..ssap.handshake import KeyStore
 from .devices import DeviceSession
 from .idle import IdleEngine
 from .network import wait_for_network
-from .power_events import PowerEvents
+from .power_events import connect_logind_manager
 from .server import IpcServer
 from .streams import StreamController
 from .topology import TopologyWatcher
@@ -36,9 +36,6 @@ class Daemon:
             for d in cfg.devices if d.enabled
         ]
         self.server = IpcServer(socket_path, self.dispatch, on_report=self._on_report)
-        self.power_events = PowerEvents(
-            on_suspend=self.on_suspend, on_resume=self.on_resume,
-            on_shutdown=self.on_shutdown, on_reboot=self.on_reboot)
         self.wake_on_input: WakeOnInput | None = None
         if cfg.global_.wake_on_input.enabled:
             self.wake_on_input = WakeOnInput(
@@ -156,32 +153,14 @@ class Daemon:
                 log.info("%s: power %s -> %s", s.cfg.id, action, r)
 
     async def on_boot(self) -> None:
+        # Suspend/resume and shutdown/reboot are handled by the lgtvc-sleep and
+        # lgtvc-shutdown oneshot units (see power_events.py for why not here);
+        # the daemon only powers on at its own start.
         if not self.cfg.global_.power_on_at_boot:
             return
         for s in self._managed():
             await wait_for_network(s.cfg.host)
         await self._power_all("on")
-
-    async def on_suspend(self) -> None:
-        log.info("suspend: powering TVs off")
-        self.server.broadcast("SYSTEM_SUSPEND")
-        await asyncio.wait_for(self._power_all("off"), timeout=4.0)
-
-    async def on_resume(self) -> None:
-        log.info("resume: powering TVs on")
-        self.server.broadcast("SYSTEM_RESUME")
-        for s in self._managed():
-            await wait_for_network(s.cfg.host)
-        await self._power_all("on")
-
-    async def on_shutdown(self) -> None:
-        log.info("shutdown: powering TVs off")
-        self.server.broadcast("SYSTEM_SHUTDOWN")
-        await asyncio.wait_for(self._power_all("off"), timeout=4.0)
-
-    async def on_reboot(self) -> None:
-        log.info("reboot: leaving TVs on")
-        self.server.broadcast("SYSTEM_REBOOT")
 
     # -- IPC dispatch ---------------------------------------------------------------
 
@@ -237,11 +216,11 @@ class Daemon:
         for sig in (signal.SIGTERM, signal.SIGINT):
             loop.add_signal_handler(sig, self._stopping.set)
         await self.server.start()
-        await self.power_events.start()
-        self.vetoes.logind = self.power_events.manager
         if self.wake_on_input is not None:
             self.wake_on_input.start()
         if self.idle_engine is not None:
+            # logind (negotiate_unix_fd=False) only for the idle-inhibitor veto
+            self.vetoes.logind = await connect_logind_manager()
             self.idle_engine.start()
         if self.topology is not None:
             self.topology.start()
@@ -259,7 +238,6 @@ class Daemon:
             self.idle_engine.stop()
         if self.wake_on_input is not None:
             self.wake_on_input.stop()
-        await self.power_events.stop()
         await self.server.stop()
         for s in self.sessions:
             await s.disconnect()
