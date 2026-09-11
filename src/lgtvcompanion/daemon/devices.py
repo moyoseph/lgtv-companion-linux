@@ -9,9 +9,16 @@ from typing import Any
 from ..config import DeviceConfig
 from ..ssap import power
 from ..ssap.client import KeyRejected, SsapClient
-from ..ssap.commands import Command, Kind, build_request
+from ..ssap.commands import (
+    Command,
+    Kind,
+    build_luna_raw,
+    build_luna_setting,
+    build_request,
+)
 from ..ssap.handshake import KeyStore
-from ..ssap.luna import set_system_setting
+from ..ssap.input_socket import send_buttons
+from ..ssap.luna import luna_send, set_system_setting
 from ..ssap.wol import send_wol
 
 log = logging.getLogger(__name__)
@@ -208,10 +215,16 @@ class DeviceSession:
                 uri, payload = build_request(cmd, args)
                 return await self.client.request(uri, payload)
             if cmd.kind == Kind.LUNA_SETTING:
-                assert cmd.luna_category and cmd.luna_setting
-                await set_system_setting(
-                    self.client, cmd.luna_category, {cmd.luna_setting: args[0]})
+                category, settings = build_luna_setting(cmd, args)
+                await set_system_setting(self.client, category, settings)
                 return {"returnValue": True}
+            if cmd.kind == Kind.LUNA_RAW:
+                for luna_uri, params in build_luna_raw(cmd, args):
+                    await luna_send(self.client, luna_uri, params)
+                return {"returnValue": True}
+            if cmd.kind == Kind.BUTTON:
+                await send_buttons(self.client, [args[0]])
+                return {"returnValue": True, "button": args[0]}
             raise ValueError(f"cannot execute {cmd.name} on a device")
         finally:
             await self.settle()
