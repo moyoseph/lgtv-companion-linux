@@ -171,23 +171,30 @@ async def run_direct(inv: Invocation, cfg: config_mod.Config | None,
         return 1
 
     status = 0
+    sessions = []
     for dev in devices:
         session = DeviceSession(dev, keystore)
         session.client.on_pairing_prompt = lambda: print(
             "Approve the connection on the TV…", file=sys.stderr)
-        try:
+        sessions.append(session)
+    try:
+        # one output line per command (matches the daemon path), so repeated
+        # commands (e.g. two -request) don't collide
+        for cmd, args in inv.commands:
+            if cmd.kind == Kind.META:
+                print(f"error: -{cmd.name} needs the daemon", file=sys.stderr)
+                status = 1
+                continue
             results: dict[str, Any] = {}
-            for cmd, args in inv.commands:
-                if cmd.kind == Kind.META:
-                    print(f"error: -{cmd.name} needs the daemon", file=sys.stderr)
+            for session in sessions:
+                try:
+                    results[session.cfg.id] = await session.execute(cmd, args)
+                except Exception as e:
+                    results[session.cfg.id] = {"error": str(e)}
                     status = 1
-                    continue
-                results[cmd.name] = await session.execute(cmd, args)
-            print(format_result({dev.id: results}, inv.output_mode, inv.output_key))
-        except Exception as e:
-            print(f"error: {dev.id}: {e}", file=sys.stderr)
-            status = 1
-        finally:
+            print(format_result(results, inv.output_mode, inv.output_key))
+    finally:
+        for session in sessions:
             await session.disconnect()
     return status
 

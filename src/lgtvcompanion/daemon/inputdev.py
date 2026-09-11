@@ -63,16 +63,21 @@ class InputMonitor:
 
     def _scan(self) -> None:
         present = set(glob.glob("/dev/input/event*"))
+        errors: list[str] = []
         for path in present - self._fds.keys():
-            self._open_device(path)
+            self._open_device(path, errors)
         for path in self._fds.keys() - present:
             self._close_device(path)
+        if not self._fds and errors:
+            log.warning("no input devices readable: %s", "; ".join(errors[:4]))
 
-    def _open_device(self, path: str) -> None:
+    def _open_device(self, path: str, errors: list[str] | None = None) -> None:
         try:
             fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
         except OSError as e:
             log.debug("%s: cannot open (%s)", path, e)
+            if errors is not None:
+                errors.append(f"{path}: {e}")
             return
         self._fds[path] = fd
         assert self._loop is not None
