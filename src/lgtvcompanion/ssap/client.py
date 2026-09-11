@@ -66,9 +66,11 @@ class SsapClient:
         timeout: float = DEFAULT_TIMEOUT,
         on_new_key: Callable[[str], None] | None = None,
         on_pairing_prompt: Callable[[], None] | None = None,
+        port: int | None = None,
     ):
         self.host = host
         self.use_ssl = use_ssl
+        self.port = port
         self.client_key = client_key
         self.timeout = timeout
         self.on_new_key = on_new_key
@@ -82,8 +84,8 @@ class SsapClient:
     @property
     def url(self) -> str:
         if self.use_ssl:
-            return f"wss://{self.host}:{PORT_SSL}/"
-        return f"ws://{self.host}:{PORT_PLAIN}/"
+            return f"wss://{self.host}:{self.port or PORT_SSL}/"
+        return f"ws://{self.host}:{self.port or PORT_PLAIN}/"
 
     @property
     def connected(self) -> bool:
