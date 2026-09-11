@@ -67,6 +67,21 @@ def test_parse_output_modes():
     assert inv.output_mode == "friendly"
     inv = parse_tokens(["-ok", "state", "-request", "power/getPowerState"])
     assert (inv.output_mode, inv.output_key) == ("key", "state")
+    inv = parse_tokens(["-output", "key", "backlight", "-get_system_settings", "picture"])
+    assert (inv.output_mode, inv.output_key) == ("key", "backlight")
+    assert [c.name for c, _ in inv.commands] == ["get_system_settings"]
+    inv = parse_tokens(["-od", "-poweron"])
+    assert inv.output_mode == "default"
+
+
+def test_parse_output_missing_key_is_error_not_silent():
+    # a flag-looking token must NOT be swallowed as the key name
+    with pytest.raises(ParseError, match="missing key"):
+        parse_tokens(["-output", "key", "-ok", "state", "-poweron"])
+    with pytest.raises(ParseError, match="missing key"):
+        parse_tokens(["-ok", "-poweron"])
+    with pytest.raises(ParseError, match="missing mode"):
+        parse_tokens(["-output", "-poweron"])
 
 
 def test_parse_json_arg():

@@ -88,6 +88,19 @@ def _is_negative_number(tok: str) -> bool:
         return False
 
 
+def _looks_like_flag(tok: str) -> bool:
+    return tok.startswith("-") and not _is_negative_number(tok)
+
+
+def _take_key(tokens: list[str], idx: int, ctx: str) -> str:
+    """Read a webOS key name at tokens[idx]. Keys are never dash-prefixed, so a
+    flag-looking token means the key was omitted — a clear error rather than
+    silently swallowing the next command/device."""
+    if idx >= len(tokens) or _looks_like_flag(tokens[idx]):
+        raise ParseError(f"{ctx}: missing key name")
+    return tokens[idx]
+
+
 def _parse_output(inv: Invocation, tokens: list[str], i: int) -> int:
     name = tokens[i].lstrip("-").lower()
     if name == "od":
@@ -97,21 +110,18 @@ def _parse_output(inv: Invocation, tokens: list[str], i: int) -> int:
         inv.output_mode = "friendly"
         return i + 1
     if name == "ok":
-        if i + 1 >= len(tokens):
-            raise ParseError("-ok: missing key")
-        inv.output_mode, inv.output_key = "key", tokens[i + 1]
+        inv.output_mode = "key"
+        inv.output_key = _take_key(tokens, i + 1, "-ok")
         return i + 2
     # -output <mode> [key]
-    if i + 1 >= len(tokens):
+    if i + 1 >= len(tokens) or _looks_like_flag(tokens[i + 1]):
         raise ParseError("-output: missing mode (default|friendly|key)")
     mode = tokens[i + 1].lower()
     if mode not in ("default", "friendly", "key"):
         raise ParseError(f"-output: bad mode {mode!r}")
     inv.output_mode = mode
     if mode == "key":
-        if i + 2 >= len(tokens):
-            raise ParseError("-output key: missing key name")
-        inv.output_key = tokens[i + 2]
+        inv.output_key = _take_key(tokens, i + 2, "-output key")
         return i + 3
     return i + 2
 
