@@ -1,10 +1,17 @@
-"""logind integration: suspend/resume/shutdown signals + delay inhibitors."""
+"""logind integration: suspend/resume/shutdown signals + delay inhibitors.
+
+The delay inhibitor is held via a `systemd-inhibit` subprocess rather than by
+receiving logind's Inhibit() lock as a D-Bus UNIX_FD. Enabling
+`negotiate_unix_fd` on the dbus-fast connection (required to receive that fd)
+poisons the process such that every subsequent outbound socket connect fails
+with EACCES — so the bus is used for signals only, with fd negotiation off.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
+import shutil
 from collections.abc import Awaitable, Callable
 
 from dbus_fast import BusType
@@ -38,14 +45,14 @@ class PowerEvents:
         self.on_reboot = on_reboot
         self._bus: MessageBus | None = None
         self.manager = None  # logind Manager proxy, public for ListInhibitors
-        self._inhibit_fd: int | None = None
+        self._inhibitor: asyncio.subprocess.Process | None = None
         self._shutdown_type: str | None = None
         self._saw_metadata = False
 
     async def start(self) -> None:
-        # negotiate_unix_fd: logind's Inhibit() hands back the lock as an fd
+        # fd negotiation OFF — see module docstring (EACCES poisoning)
         self._bus = await MessageBus(
-            bus_type=BusType.SYSTEM, negotiate_unix_fd=True).connect()
+            bus_type=BusType.SYSTEM, negotiate_unix_fd=False).connect()
         introspection = await self._bus.introspect(LOGIND, LOGIND_PATH)
         obj = self._bus.get_proxy_object(LOGIND, LOGIND_PATH, introspection)
         self.manager = obj.get_interface(LOGIND_MANAGER)
@@ -64,24 +71,30 @@ class PowerEvents:
         log.info("logind power events armed (delay inhibitor held)")
 
     async def _take_inhibitor(self) -> None:
-        if self._inhibit_fd is not None:
+        if self._inhibitor is not None and self._inhibitor.returncode is None:
+            return
+        inhibit_bin = shutil.which("systemd-inhibit")
+        if inhibit_bin is None:
+            log.warning("systemd-inhibit not found — suspend/shutdown may race "
+                        "network teardown")
             return
         try:
-            fd = await self.manager.call_inhibit(
-                "sleep:shutdown", "LGTV Companion",
-                "Synchronizing TV power state", "delay")
-            # dbus-fast unmarshals UNIX_FD as the raw fd integer
-            self._inhibit_fd = fd
-        except Exception as e:
+            self._inhibitor = await asyncio.create_subprocess_exec(
+                inhibit_bin, "--what=sleep:shutdown", "--who=LGTV Companion",
+                "--why=Synchronizing TV power state", "--mode=delay",
+                "sleep", "infinity",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL)
+        except OSError as e:
             log.warning("could not take delay inhibitor: %s", e)
 
     def _release_inhibitor(self) -> None:
-        if self._inhibit_fd is not None:
+        if self._inhibitor is not None and self._inhibitor.returncode is None:
             try:
-                os.close(self._inhibit_fd)
-            except OSError:
+                self._inhibitor.terminate()
+            except ProcessLookupError:
                 pass
-            self._inhibit_fd = None
+        self._inhibitor = None
 
     # -- signal handlers (sync entry, schedule async work) --------------------
 

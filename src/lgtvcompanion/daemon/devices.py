@@ -98,9 +98,8 @@ class DeviceSession:
                         self._wol()
                     delay = min(self.cfg.backoff_max,
                                 self.cfg.backoff_base * 2 ** (attempt - 1))
-                    log.info("%s: attempt %d/%d failed (%s: %r) — retrying in %.0fs",
-                             self.cfg.id, attempt, attempts,
-                             type(last_err).__name__, str(last_err), delay)
+                    log.info("%s: attempt %d/%d failed (%s) — retrying in %.0fs",
+                             self.cfg.id, attempt, attempts, last_err, delay)
                     await asyncio.sleep(delay)
             raise ConnectionError(
                 f"{self.cfg.id}: unreachable after {attempts} attempts: {last_err}")
