@@ -29,6 +29,24 @@ IN_CREATE = 0x00000100
 IN_DELETE = 0x00000200
 RESCAN_FALLBACK_INTERVAL = 45.0
 
+INPUT_PROP_ACCELEROMETER = 0x06
+
+
+def _ioc(direction: int, nr: int, size: int) -> int:
+    return (direction << 30) | (size << 16) | (ord("E") << 8) | nr
+
+
+def is_accelerometer(fd: int) -> bool:
+    """Gyro/accel devices stream constantly and must never count as user
+    activity (upstream excludes them the same way)."""
+    import fcntl
+    buf = bytearray(8)
+    try:
+        fcntl.ioctl(fd, _ioc(2, 0x09, len(buf)), buf)  # EVIOCGPROP
+    except OSError:
+        return False
+    return bool(buf[INPUT_PROP_ACCELEROMETER // 8] & (1 << (INPUT_PROP_ACCELEROMETER % 8)))
+
 
 class InputMonitor:
     """Watches every readable /dev/input/event* and invokes the callback with
@@ -78,6 +96,10 @@ class InputMonitor:
             log.debug("%s: cannot open (%s)", path, e)
             if errors is not None:
                 errors.append(f"{path}: {e}")
+            return
+        if is_accelerometer(fd):
+            log.debug("%s: accelerometer, skipped", path)
+            os.close(fd)
             return
         self._fds[path] = fd
         assert self._loop is not None

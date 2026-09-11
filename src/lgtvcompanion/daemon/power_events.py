@@ -37,7 +37,7 @@ class PowerEvents:
         self.on_shutdown = on_shutdown
         self.on_reboot = on_reboot
         self._bus: MessageBus | None = None
-        self._manager = None
+        self.manager = None  # logind Manager proxy, public for ListInhibitors
         self._inhibit_fd: int | None = None
         self._shutdown_type: str | None = None
         self._saw_metadata = False
@@ -48,17 +48,17 @@ class PowerEvents:
             bus_type=BusType.SYSTEM, negotiate_unix_fd=True).connect()
         introspection = await self._bus.introspect(LOGIND, LOGIND_PATH)
         obj = self._bus.get_proxy_object(LOGIND, LOGIND_PATH, introspection)
-        self._manager = obj.get_interface(LOGIND_MANAGER)
+        self.manager = obj.get_interface(LOGIND_MANAGER)
 
-        self._manager.on_prepare_for_sleep(self._prepare_for_sleep)
+        self.manager.on_prepare_for_sleep(self._prepare_for_sleep)
         try:
-            self._manager.on_prepare_for_shutdown_with_metadata(
+            self.manager.on_prepare_for_shutdown_with_metadata(
                 self._prepare_for_shutdown_with_metadata)
             log.debug("subscribed to PrepareForShutdownWithMetadata")
         except AttributeError:
             log.info("PrepareForShutdownWithMetadata unavailable (systemd <255); "
                      "reboot detection relies on the Conflicts=reboot.target unit")
-        self._manager.on_prepare_for_shutdown(self._prepare_for_shutdown)
+        self.manager.on_prepare_for_shutdown(self._prepare_for_shutdown)
 
         await self._take_inhibitor()
         log.info("logind power events armed (delay inhibitor held)")
@@ -67,7 +67,7 @@ class PowerEvents:
         if self._inhibit_fd is not None:
             return
         try:
-            fd = await self._manager.call_inhibit(
+            fd = await self.manager.call_inhibit(
                 "sleep:shutdown", "LGTV Companion",
                 "Synchronizing TV power state", "delay")
             # dbus-fast unmarshals UNIX_FD as the raw fd integer

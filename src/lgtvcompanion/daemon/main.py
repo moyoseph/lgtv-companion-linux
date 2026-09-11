@@ -15,9 +15,11 @@ from .. import ipc, sdnotify
 from ..ssap.commands import Kind, lookup
 from ..ssap.handshake import KeyStore
 from .devices import DeviceSession
+from .idle import IdleEngine
 from .network import wait_for_network
 from .power_events import PowerEvents
 from .server import IpcServer
+from .vetoes import VetoEngine
 from .wake import WakeOnInput
 
 log = logging.getLogger("lgtvc-daemon")
@@ -41,6 +43,12 @@ class Daemon:
                 is_tv_reachable=self._any_tv_reachable,
                 wake=self._wake_all,
                 cooldown_s=cfg.global_.wake_on_input.cooldown_s)
+        self.vetoes = VetoEngine(cfg.global_.idle)
+        self.idle_engine: IdleEngine | None = None
+        if cfg.global_.idle.enabled:
+            self.idle_engine = IdleEngine(
+                minutes=cfg.global_.idle.minutes, vetoes=self.vetoes,
+                on_idle=self._idle_blank, on_busy=self._idle_unblank)
         self._stopping = asyncio.Event()
 
     # -- device selection ------------------------------------------------------
@@ -62,8 +70,37 @@ class Daemon:
         return out
 
     def _on_report(self, report: dict) -> None:
-        if report.get("input_event") and self.wake_on_input is not None:
-            self.wake_on_input.notify_input()
+        if "mpris_playing" in report or "fullscreen" in report:
+            self.vetoes.update_agent_state(report)
+        if report.get("activity") or report.get("input_event"):
+            if self.idle_engine is not None:
+                self.idle_engine.notify_activity()
+            # only key presses wake an off TV; pointer noise shouldn't
+            if report.get("key", True) and self.wake_on_input is not None:
+                self.wake_on_input.notify_input()
+
+    async def _idle_blank(self) -> None:
+        self.server.broadcast("SYSTEM_USER_IDLE")
+        for s in self._managed():
+            try:
+                result = await s.blank()
+                if result == "blanked" and self.cfg.global_.idle.mute_speakers \
+                        and not self.dry_run:
+                    await s.client.request("audio/setMute", {"mute": True})
+                log.info("%s: idle blank -> %s", s.cfg.id, result)
+            except Exception as e:
+                log.error("%s: idle blank failed: %s", s.cfg.id, e)
+
+    async def _idle_unblank(self) -> None:
+        self.server.broadcast("SYSTEM_USER_BUSY")
+        for s in self._managed():
+            try:
+                result = await s.unblank()
+                if self.cfg.global_.idle.mute_speakers and not self.dry_run:
+                    await s.client.request("audio/setMute", {"mute": False})
+                log.info("%s: idle unblank -> %s", s.cfg.id, result)
+            except Exception as e:
+                log.error("%s: idle unblank failed: %s", s.cfg.id, e)
 
     async def _any_tv_reachable(self) -> bool:
         for s in self._managed():
@@ -146,10 +183,15 @@ class Daemon:
                 s.auto_enabled = False
             return {s.cfg.id: "auto-disabled" for s in sessions}
         if action == "force_idle":
+            if self.idle_engine is not None:
+                await self.idle_engine.force_idle()
+                return {"idle": "forced"}
             self.server.broadcast("SYSTEM_USER_IDLE")
-            results = {s.cfg.id: await s.blank() for s in sessions}
-            return results
+            return {s.cfg.id: await s.blank() for s in sessions}
         if action == "force_unidle":
+            if self.idle_engine is not None:
+                await self.idle_engine.force_unidle()
+                return {"idle": "released"}
             self.server.broadcast("SYSTEM_USER_BUSY")
             return {s.cfg.id: await s.unblank() for s in sessions}
         if action in ("streaming_connect", "streaming_disconnect"):
@@ -168,8 +210,11 @@ class Daemon:
             loop.add_signal_handler(sig, self._stopping.set)
         await self.server.start()
         await self.power_events.start()
+        self.vetoes.logind = self.power_events.manager
         if self.wake_on_input is not None:
             self.wake_on_input.start()
+        if self.idle_engine is not None:
+            self.idle_engine.start()
         sdnotify.ready()
         sdnotify.status("running" + (" (dry-run)" if self.dry_run else ""))
         if self.dry_run:
@@ -178,6 +223,8 @@ class Daemon:
         await self._stopping.wait()
         sdnotify.stopping()
         # plain service stop (upgrade/restart): do not touch TV power
+        if self.idle_engine is not None:
+            self.idle_engine.stop()
         if self.wake_on_input is not None:
             self.wake_on_input.stop()
         await self.power_events.stop()
