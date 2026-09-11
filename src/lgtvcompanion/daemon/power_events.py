@@ -43,7 +43,9 @@ class PowerEvents:
         self._saw_metadata = False
 
     async def start(self) -> None:
-        self._bus = await MessageBus(bus_type=BusType.SYSTEM).connect()
+        # negotiate_unix_fd: logind's Inhibit() hands back the lock as an fd
+        self._bus = await MessageBus(
+            bus_type=BusType.SYSTEM, negotiate_unix_fd=True).connect()
         introspection = await self._bus.introspect(LOGIND, LOGIND_PATH)
         obj = self._bus.get_proxy_object(LOGIND, LOGIND_PATH, introspection)
         self._manager = obj.get_interface(LOGIND_MANAGER)
