@@ -41,11 +41,17 @@ class WakeOnInput:
     def _on_event(self, path: str, etype: int, code: int, value: int) -> None:
         if etype != EV_KEY or value != KEY_PRESS:
             return
+        self.notify_input(path)
+
+    def notify_input(self, source: str = "agent") -> None:
+        """Key-press signal — from the local monitor or from the session
+        agent over IPC (SELinux blocks the system service from /dev/input, so
+        in practice the agent is the usual source)."""
         now = time.monotonic()
         if self._busy or now - self._last_attempt < self.cooldown_s:
             return
         self._last_attempt = now
-        asyncio.get_running_loop().create_task(self._maybe_wake(path))
+        asyncio.get_running_loop().create_task(self._maybe_wake(source))
 
     async def _maybe_wake(self, source: str) -> None:
         self._busy = True

@@ -59,6 +59,26 @@ StandardError=journal
 WantedBy=poweroff.target halt.target
 """
 
+AGENT_UNIT = "lgtvc-agent.service"
+USER_UNIT_DIR = Path("/etc/systemd/user")
+
+# Runs in the graphical session: /dev/input is readable there via the seat's
+# uaccess ACL, which the SELinux-confined system daemon is denied.
+AGENT_UNIT_TEMPLATE = """\
+[Unit]
+Description=LGTV Companion session agent
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecStart={agent_bin}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target
+"""
+
 LEGACY_UNITS = ["lgtv-startup.service", "lgtv-shutdown.service", "lgtv-sleep.service"]
 LEGACY_USER_UNIT = "tv-wake-on-input.service"
 
@@ -90,8 +110,13 @@ def cmd_install(args: argparse.Namespace) -> int:
         daemon_bin=_bin("lgtvc-daemon"), config_path=config_path, user_line=user_line))
     (SYSTEM_UNIT_DIR / SHUTDOWN_UNIT).write_text(SHUTDOWN_UNIT_TEMPLATE.format(
         cli_bin=_bin("lgtvc"), config_path=config_path))
+    USER_UNIT_DIR.mkdir(parents=True, exist_ok=True)
+    (USER_UNIT_DIR / AGENT_UNIT).write_text(AGENT_UNIT_TEMPLATE.format(
+        agent_bin=_bin("lgtvc-agent")))
+    _run(["systemctl", "--global", "enable", AGENT_UNIT], check=False)
     _run(["systemctl", "daemon-reload"])
-    print(f"installed {DAEMON_UNIT} and {SHUTDOWN_UNIT} (not enabled yet)")
+    print(f"installed {DAEMON_UNIT}, {SHUTDOWN_UNIT} (not enabled) "
+          f"and {AGENT_UNIT} (user, globally enabled)")
     print("next: lgtvc setup import-legacy   (or: lgtvc setup pair --host <tv-ip>)")
     return 0
 

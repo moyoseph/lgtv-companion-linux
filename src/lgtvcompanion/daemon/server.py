@@ -14,12 +14,15 @@ from .. import ipc
 log = logging.getLogger(__name__)
 
 Dispatcher = Callable[[str, list, list[str]], Awaitable[dict]]
+ReportHandler = Callable[[dict], None]
 
 
 class IpcServer:
-    def __init__(self, socket_path: str, dispatcher: Dispatcher):
+    def __init__(self, socket_path: str, dispatcher: Dispatcher,
+                 on_report: ReportHandler | None = None):
         self.socket_path = socket_path
         self.dispatcher = dispatcher
+        self.on_report = on_report
         self._server: asyncio.Server | None = None
         self._subscribers: set[asyncio.StreamWriter] = set()
 
@@ -75,8 +78,9 @@ class IpcServer:
                     await writer.drain()
                     continue
                 if "report" in frame:
-                    # session-agent state reports; consumed by the idle engine (v0.2)
                     log.debug("agent report: %s", frame["report"])
+                    if self.on_report is not None:
+                        self.on_report(frame["report"])
                     continue
                 if "cmd" in frame:
                     resp = await self._dispatch(frame)

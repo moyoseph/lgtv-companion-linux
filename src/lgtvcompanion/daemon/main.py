@@ -31,7 +31,7 @@ class Daemon:
             DeviceSession(d, keystore, dry_run=self.dry_run)
             for d in cfg.devices if d.enabled
         ]
-        self.server = IpcServer(socket_path, self.dispatch)
+        self.server = IpcServer(socket_path, self.dispatch, on_report=self._on_report)
         self.power_events = PowerEvents(
             on_suspend=self.on_suspend, on_resume=self.on_resume,
             on_shutdown=self.on_shutdown, on_reboot=self.on_reboot)
@@ -60,6 +60,10 @@ class Daemon:
             else:
                 raise ValueError(f"unknown device: {sel!r}")
         return out
+
+    def _on_report(self, report: dict) -> None:
+        if report.get("input_event") and self.wake_on_input is not None:
+            self.wake_on_input.notify_input()
 
     async def _any_tv_reachable(self) -> bool:
         for s in self._managed():
