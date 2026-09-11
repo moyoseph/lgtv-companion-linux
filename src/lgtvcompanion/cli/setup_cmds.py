@@ -26,13 +26,13 @@ Wants=network-online.target
 After=network-online.target NetworkManager-wait-online.service
 
 [Service]
-# Type=simple, NOT notify: on systemd 259 (Bazzite) a Type=notify service's
-# process gets EACCES on every outbound socket connect — a reproducible but
-# unexplained interaction. Type=simple is unaffected and standard for a
-# Python daemon; sd_notify readiness isn't needed here.
 Type=simple
-{user_line}SupplementaryGroups=input
-ExecStart={daemon_bin} --config {config_path}
+# Launch the venv interpreter directly with -m, NOT the pip console-script
+# entry point: on Bazzite (ostree + SELinux), exec'ing the lib_t-labelled
+# lgtvc-daemon wrapper leaves the process in a domain whose outbound socket
+# connects all fail with EACCES. `python -m` is unaffected. (Cost a very long
+# debugging session to isolate — do not "simplify" back to the console script.)
+{user_line}ExecStart={python_bin} -m lgtvcompanion.daemon.main --config {config_path}
 Restart=on-failure
 RestartSec=3
 RuntimeDirectory=lgtv-companion
@@ -56,7 +56,7 @@ Before=poweroff.target halt.target
 
 [Service]
 Type=oneshot
-ExecStart={cli_bin} --direct --config {config_path} -poweroff
+ExecStart={python_bin} -m lgtvcompanion.cli.main --direct --config {config_path} -poweroff
 TimeoutStartSec=15
 StandardOutput=journal
 StandardError=journal
@@ -77,8 +77,8 @@ StopWhenUnneeded=yes
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart={cli_bin} --direct --config {config_path} -poweroff
-ExecStop={cli_bin} --direct --config {config_path} --wait-network -poweron
+ExecStart={python_bin} -m lgtvcompanion.cli.main --direct --config {config_path} -poweroff
+ExecStop={python_bin} -m lgtvcompanion.cli.main --direct --config {config_path} --wait-network -poweron
 TimeoutStartSec=15
 TimeoutStopSec=45
 StandardOutput=journal
@@ -141,6 +141,12 @@ def _bin(name: str) -> str:
     sys.exit(f"cannot locate {name} — is the package installed?")
 
 
+def _python_bin() -> str:
+    """The venv interpreter. Units exec this with -m rather than the console
+    scripts (see the daemon unit comment for why)."""
+    return sys.executable
+
+
 def _run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
     print(f"+ {' '.join(cmd)}")
     return subprocess.run(cmd, check=check, capture_output=False)
@@ -154,12 +160,13 @@ def cmd_install(args: argparse.Namespace) -> int:
     config_path = config_mod.SYSTEM_CONFIG
     config_path.parent.mkdir(parents=True, exist_ok=True)
     user_line = f"User={args.service_user}\n" if args.service_user != "root" else ""
+    python_bin = _python_bin()
     (SYSTEM_UNIT_DIR / DAEMON_UNIT).write_text(DAEMON_UNIT_TEMPLATE.format(
-        daemon_bin=_bin("lgtvc-daemon"), config_path=config_path, user_line=user_line))
+        python_bin=python_bin, config_path=config_path, user_line=user_line))
     (SYSTEM_UNIT_DIR / SHUTDOWN_UNIT).write_text(SHUTDOWN_UNIT_TEMPLATE.format(
-        cli_bin=_bin("lgtvc"), config_path=config_path))
+        python_bin=python_bin, config_path=config_path))
     (SYSTEM_UNIT_DIR / SLEEP_UNIT).write_text(SLEEP_UNIT_TEMPLATE.format(
-        cli_bin=_bin("lgtvc"), config_path=config_path))
+        python_bin=python_bin, config_path=config_path))
     USER_UNIT_DIR.mkdir(parents=True, exist_ok=True)
     (USER_UNIT_DIR / AGENT_UNIT).write_text(AGENT_UNIT_TEMPLATE.format(
         agent_bin=_bin("lgtvc-agent")))
