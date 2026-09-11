@@ -1,9 +1,8 @@
 """lgtvc-tray: system-tray control (optional [tray] extra, PySide6).
 
-Core actions per device (power/screen/HDMI), idle force/release, and a live
-SYSTEM_* event log. Talks to the daemon over the IPC socket with short-lived
-synchronous requests — no Qt/asyncio bridge needed. The settings dialog
-arrives in a later release; `lgtvc setup edit-config` covers it meanwhile.
+Core actions per device (power/screen/HDMI), idle force/release, and a settings
+dialog (see settings.py). Talks to the daemon over the IPC socket with
+short-lived synchronous requests — no Qt/asyncio bridge needed.
 """
 
 from __future__ import annotations
@@ -99,6 +98,21 @@ def main() -> None:
     idle_off = QAction("Resume from idle", menu)
     idle_off.triggered.connect(run("unidle"))
     menu.addAction(idle_off)
+
+    menu.addSeparator()
+    settings_action = QAction("Settings…", menu)
+
+    def open_settings():
+        try:
+            from .settings import build_dialog
+            dlg = build_dialog(
+                lambda cmd, args, devices: ipc_request(cmd, args, devices))
+            dlg.exec()
+        except Exception as e:
+            QMessageBox.warning(None, "LGTV Companion", f"Settings failed:\n{e}")
+
+    settings_action.triggered.connect(open_settings)
+    menu.addAction(settings_action)
 
     menu.addSeparator()
     quit_action = QAction("Quit", menu)

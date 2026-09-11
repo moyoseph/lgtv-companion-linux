@@ -28,8 +28,10 @@ log = logging.getLogger("lgtvc-daemon")
 
 
 class Daemon:
-    def __init__(self, cfg: config_mod.Config, keystore: KeyStore, socket_path: str):
+    def __init__(self, cfg: config_mod.Config, keystore: KeyStore, socket_path: str,
+                 config_path: config_mod.Path | None = None):
         self.cfg = cfg
+        self._config_path = config_path
         self.dry_run = cfg.global_.dry_run
         self.sessions = [
             DeviceSession(d, keystore, dry_run=self.dry_run)
@@ -166,6 +168,10 @@ class Daemon:
 
     async def dispatch(self, cmd_name: str, args: list[Any],
                        selectors: list[str]) -> dict:
+        if cmd_name == "reload":
+            return self.reload()
+        if cmd_name == "status":
+            return self.status()
         cmd = lookup(cmd_name)
         if cmd is None:
             raise ValueError(f"unknown command: {cmd_name!r}")
@@ -208,6 +214,59 @@ class Daemon:
         if action == "clear_log":
             return {"log": "journald-managed; use journalctl --vacuum-*"}
         raise ValueError(f"unhandled meta action {action!r}")
+
+    def status(self) -> dict:
+        return {
+            "dry_run": self.dry_run,
+            "idle_enabled": self.idle_engine is not None,
+            "idle_active": self.idle_engine.is_idle if self.idle_engine else False,
+            "streaming": self.streams.streaming,
+            "devices": {
+                s.cfg.id: {"name": s.cfg.name, "auto_enabled": s.auto_enabled,
+                           "connected": s.client.connected}
+                for s in self.sessions},
+        }
+
+    def reload(self) -> dict:
+        """Re-read config and hot-apply what's safe (per-device tunables, idle
+        settings). Device add/remove needs a restart — reported, not applied."""
+        if self._config_path is None:
+            return {"reloaded": False, "error": "no config path"}
+        try:
+            new = config_mod.load(self._config_path)
+        except (ValueError, OSError) as e:
+            return {"reloaded": False, "error": str(e)}
+        old_ids = {s.cfg.id for s in self.sessions}
+        new_ids = {d.id for d in new.devices if d.enabled}
+        restart_needed = old_ids != new_ids
+        by_id = {d.id: d for d in new.devices}
+        for s in self.sessions:
+            if s.cfg.id in by_id:
+                nd = by_id[s.cfg.id]
+                # hot-apply mutable per-device tunables (host/ssl change needs restart)
+                if nd.host != s.cfg.host or nd.ssl != s.cfg.ssl:
+                    restart_needed = True
+                for f in ("mac", "wol_method", "subnet", "source_hdmi_input",
+                          "check_hdmi_input_when_powering_off", "set_hdmi_input",
+                          "set_hdmi_input_delay", "standby_mode",
+                          "persistent_connection"):
+                    setattr(s.cfg, f, getattr(nd, f))
+        # idle engine: apply enable/minutes by rebuilding it
+        g = new.global_
+        self.cfg.global_ = g
+        self.vetoes.cfg = g.idle
+        if self.idle_engine is not None:
+            self.idle_engine.stop()
+            self.idle_engine = None
+        if g.idle.enabled:
+            self.idle_engine = IdleEngine(
+                minutes=g.idle.minutes, vetoes=self.vetoes,
+                on_idle=self._idle_blank, on_busy=self._idle_unblank)
+            self.idle_engine.start()
+        if self.wake_on_input is not None:
+            self.wake_on_input.cooldown_s = g.wake_on_input.cooldown_s
+        log.info("config reloaded (restart_needed=%s)", restart_needed)
+        return {"reloaded": True, "restart_needed": restart_needed}
 
     # -- lifecycle -----------------------------------------------------------------
 
@@ -270,7 +329,8 @@ def main() -> None:
     if args.socket is None and runtime_dir:
         socket_path = os.path.join(runtime_dir.split(":")[0], "ipc.sock")
 
-    daemon = Daemon(cfg, keystore, socket_path)
+    daemon = Daemon(cfg, keystore, socket_path,
+                    config_path=config_mod.Path(cfg_path))
     asyncio.run(daemon.run())
 
 
