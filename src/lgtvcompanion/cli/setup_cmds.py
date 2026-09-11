@@ -111,7 +111,9 @@ WantedBy=graphical-session.target
 
 TRAY_UNIT = "lgtvc-tray.service"
 
-# Self-skips outside desktop sessions (no StatusNotifierWatcher in gamescope)
+# Self-skips outside a real desktop: gamescope/Steam Game Mode DOES register a
+# StatusNotifierWatcher but has no usable Qt tray (QSystemTrayIcon SIGABRTs), so
+# skip gamescope/SteamOS sessions explicitly, then require a tray host.
 TRAY_UNIT_TEMPLATE = """\
 [Unit]
 Description=LGTV Companion tray
@@ -119,10 +121,10 @@ PartOf=graphical-session.target
 After=graphical-session.target
 
 [Service]
-ExecCondition=/bin/sh -c 'busctl --user list --no-legend | grep -q StatusNotifierWatcher'
+ExecCondition=/bin/sh -c 'case "$XDG_CURRENT_DESKTOP" in *gamescope*|*steamos*|*Steam*) exit 1;; esac; busctl --user list --no-legend | grep -q StatusNotifierWatcher'
 ExecStart={python_bin} -m lgtvcompanion.tray.app
 Restart=on-failure
-RestartSec=10
+RestartSec=30
 
 [Install]
 WantedBy=graphical-session.target
