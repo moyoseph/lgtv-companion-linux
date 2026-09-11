@@ -61,15 +61,34 @@ class Agent:
             self._send_queue.put_nowait({"activity": True, "key": etype == EV_KEY})
 
     async def _state_loop(self) -> None:
+        from dbus_fast import BusType
+        from dbus_fast.aio import MessageBus
+
+        from .fullscreen import FullscreenProbe
         from .mpris import mpris_any_playing
+
+        bus = None
+        fs_probe: FullscreenProbe | None = None
+        try:
+            bus = await MessageBus(bus_type=BusType.SESSION).connect()
+            fs_probe = FullscreenProbe(bus)
+            if not await fs_probe.available():
+                log.info("KWin not on the session bus — fullscreen veto disabled")
+                fs_probe = None
+        except Exception as e:
+            log.debug("session bus unavailable (%s); mpris/fullscreen off", e)
+
         while True:
             await asyncio.sleep(STATE_REPORT_INTERVAL)
             try:
-                playing = await mpris_any_playing()
+                playing = await mpris_any_playing(bus)
             except Exception as e:
                 log.debug("mpris probe failed: %s", e)
                 playing = False
-            state = {"mpris_playing": playing, "fullscreen": None}
+            fullscreen = None
+            if fs_probe is not None:
+                fullscreen = await fs_probe.probe()
+            state = {"mpris_playing": playing, "fullscreen": fullscreen}
             if state != self._state:
                 self._state = state
                 with contextlib.suppress(asyncio.QueueFull):

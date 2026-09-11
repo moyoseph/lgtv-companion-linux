@@ -21,8 +21,9 @@ async def _get_bus() -> MessageBus:
     return _bus
 
 
-async def mpris_any_playing() -> bool:
-    bus = await _get_bus()
+async def mpris_any_playing(bus: MessageBus | None = None) -> bool:
+    if bus is None:
+        bus = await _get_bus()
     reply = await bus.call(Message(
         destination="org.freedesktop.DBus", path="/org/freedesktop/DBus",
         interface="org.freedesktop.DBus", member="ListNames"))
