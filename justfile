@@ -8,11 +8,13 @@ venv := "/usr/local/lib/lgtv-companion"
 key:
     ssh-copy-id -i ~/.ssh/id_ed25519_pepsi.pub -o PubkeyAuthentication=no {{host}}
 
-# rsync the source over and reinstall into the box venv, restart the daemon
+# rsync the source over and reinstall into the box venv, restart the daemon.
+# NOT an editable install: SELinux blocks system services from reading
+# user_home_t, so the code must live inside the venv.
 deploy:
     rsync -az --delete --exclude .venv --exclude .git --exclude __pycache__ \
         ./ {{host}}:{{remote_dir}}/
-    ssh {{host}} "sudo {{venv}}/bin/pip install -q --no-deps -e {{remote_dir}} && \
+    ssh {{host}} "sudo {{venv}}/bin/pip install -q --no-deps --force-reinstall {{remote_dir}} && \
         sudo systemctl try-restart lgtvc-daemon 2>/dev/null; true"
 
 # First-time box setup: create the venv and install with deps
@@ -20,7 +22,7 @@ bootstrap:
     rsync -az --delete --exclude .venv --exclude .git --exclude __pycache__ \
         ./ {{host}}:{{remote_dir}}/
     ssh {{host}} "sudo python3 -m venv {{venv}} && \
-        sudo {{venv}}/bin/pip install -q -e {{remote_dir}} && \
+        sudo {{venv}}/bin/pip install -q {{remote_dir}} && \
         sudo ln -sf {{venv}}/bin/lgtvc {{venv}}/bin/lgtvc-daemon /usr/local/bin/"
 
 logs:

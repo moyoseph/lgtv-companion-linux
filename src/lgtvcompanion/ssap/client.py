@@ -93,14 +93,22 @@ class SsapClient:
 
     async def connect(self, *, pairing: bool = False) -> None:
         ssl_ctx = _ssl_context() if self.use_ssl else None
-        self._ws = await asyncio.wait_for(
-            websockets.connect(
-                self.url, ssl=ssl_ctx, open_timeout=self.timeout, close_timeout=2
-            ),
-            timeout=self.timeout + 2,
-        )
+        try:
+            self._ws = await asyncio.wait_for(
+                websockets.connect(
+                    self.url, ssl=ssl_ctx, open_timeout=self.timeout, close_timeout=2
+                ),
+                timeout=self.timeout + 2,
+            )
+        except websockets.WebSocketException as e:
+            raise ConnectionError(f"{self.host}: {e}") from e
         try:
             await self._register(pairing=pairing)
+        except websockets.WebSocketException as e:
+            # e.g. the TV closing with 1008 "Try Again Later (EWS)" while it
+            # is not fully awake — a retriable condition, not a protocol error
+            await self.close()
+            raise ConnectionError(f"{self.host}: {e}") from e
         except BaseException:
             await self.close()
             raise
@@ -192,6 +200,8 @@ class SsapClient:
         try:
             await self._ws.send(json.dumps(msg))
             resp = await asyncio.wait_for(fut, timeout=timeout or self.timeout)
+        except websockets.WebSocketException as e:
+            raise ConnectionError(f"{self.host}: {e}") from e
         finally:
             self._pending.pop(mid, None)
         rpayload = resp.get("payload", {})
