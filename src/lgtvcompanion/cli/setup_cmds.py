@@ -79,6 +79,25 @@ RestartSec=5
 WantedBy=graphical-session.target
 """
 
+TRAY_UNIT = "lgtvc-tray.service"
+
+# Self-skips outside desktop sessions (no StatusNotifierWatcher in gamescope)
+TRAY_UNIT_TEMPLATE = """\
+[Unit]
+Description=LGTV Companion tray
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+ExecCondition=/bin/sh -c 'busctl --user list --no-legend | grep -q StatusNotifierWatcher'
+ExecStart={tray_bin}
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=graphical-session.target
+"""
+
 LEGACY_UNITS = ["lgtv-startup.service", "lgtv-shutdown.service", "lgtv-sleep.service"]
 LEGACY_USER_UNIT = "tv-wake-on-input.service"
 
@@ -113,10 +132,17 @@ def cmd_install(args: argparse.Namespace) -> int:
     USER_UNIT_DIR.mkdir(parents=True, exist_ok=True)
     (USER_UNIT_DIR / AGENT_UNIT).write_text(AGENT_UNIT_TEMPLATE.format(
         agent_bin=_bin("lgtvc-agent")))
+    tray_bin = Path(sys.argv[0]).resolve().parent / "lgtvc-tray"
+    if tray_bin.exists():
+        (USER_UNIT_DIR / TRAY_UNIT).write_text(TRAY_UNIT_TEMPLATE.format(
+            tray_bin=tray_bin))
     _run(["systemctl", "--global", "enable", AGENT_UNIT], check=False)
     _run(["systemctl", "daemon-reload"])
     print(f"installed {DAEMON_UNIT}, {SHUTDOWN_UNIT} (not enabled) "
           f"and {AGENT_UNIT} (user, globally enabled)")
+    if tray_bin.exists():
+        print(f"tray unit installed — enable per user with: "
+              f"systemctl --user enable --now {TRAY_UNIT}")
     print("next: lgtvc setup import-legacy   (or: lgtvc setup pair --host <tv-ip>)")
     return 0
 
