@@ -229,6 +229,7 @@ class Daemon:
         if self.dry_run:
             log.warning("DRY-RUN mode: no TV commands will be sent")
         asyncio.create_task(self.on_boot())
+        log.info("ready%s", " (dry-run)" if self.dry_run else "")
         await self._stopping.wait()
         sdnotify.stopping()
         # plain service stop (upgrade/restart): do not touch TV power

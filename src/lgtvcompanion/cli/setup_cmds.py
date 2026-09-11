@@ -26,7 +26,11 @@ Wants=network-online.target
 After=network-online.target NetworkManager-wait-online.service
 
 [Service]
-Type=notify
+# Type=simple, NOT notify: on systemd 259 (Bazzite) a Type=notify service's
+# process gets EACCES on every outbound socket connect — a reproducible but
+# unexplained interaction. Type=simple is unaffected and standard for a
+# Python daemon; sd_notify readiness isn't needed here.
+Type=simple
 {user_line}SupplementaryGroups=input
 ExecStart={daemon_bin} --config {config_path}
 Restart=on-failure
