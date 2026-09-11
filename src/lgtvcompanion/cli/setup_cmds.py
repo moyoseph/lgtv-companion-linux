@@ -232,7 +232,10 @@ def cmd_migrate_legacy(args: argparse.Namespace) -> int:
     if args.legacy_user:
         _run(["systemctl", "--machine", f"{args.legacy_user}@.host", "--user",
               "disable", "--now", LEGACY_USER_UNIT], check=False)
-    _run(["systemctl", "enable", "--now", DAEMON_UNIT, SHUTDOWN_UNIT])
+    _run(["systemctl", "enable", DAEMON_UNIT, SHUTDOWN_UNIT])
+    # restart (not just enable --now): a running daemon must reload the
+    # config now that dry_run flipped off
+    _run(["systemctl", "restart", DAEMON_UNIT])
     print("migrated: legacy units disabled, lgtvc units enabled")
     print("rollback anytime: sudo lgtvc setup rollback-legacy")
     return 0
