@@ -34,7 +34,12 @@ lgtvc-agent = "lgtvcompanion.agent.main:main"
 lgtvc-tray = "lgtvcompanion.tray.app:main"
 
 [project.urls]
-Homepage = "https://github.com/JPersson77/LGTVCompanion"
+# TODO(publish): set OWNER to the real GitHub account before the first release
+Homepage = "https://github.com/OWNER/lgtv-companion-linux"
+Repository = "https://github.com/OWNER/lgtv-companion-linux"
+Issues = "https://github.com/OWNER/lgtv-companion-linux/issues"
+Changelog = "https://github.com/OWNER/lgtv-companion-linux/blob/main/CHANGELOG.md"
+"Upstream (Windows)" = "https://github.com/JPersson77/LGTVCompanion"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/lgtvcompanion"]

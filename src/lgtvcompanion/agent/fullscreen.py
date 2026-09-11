@@ -60,9 +60,9 @@ class _Reporter(ServiceInterface):
         self._on_report = on_report
 
     @method()
-    def Report(self, fullscreen: "b", app: "s"):  # noqa: F821,N802,UP037
+    def Report(self, fullscreen: "b", app: "s"):  # type: ignore[name-defined]  # noqa: F821,N802,UP037
         # dbus-fast reads these string annotations as D-Bus signatures ("b",
-        # "s") — they must stay quoted, so UP037 is intentionally suppressed.
+        # "s") — they must stay quoted, so UP037/name-defined are suppressed.
         self._on_report(fullscreen, app)
 
 

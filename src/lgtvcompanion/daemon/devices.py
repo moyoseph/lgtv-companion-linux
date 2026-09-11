@@ -235,12 +235,16 @@ class DeviceSession:
 
     async def execute(self, cmd: Command, args: list[Any]) -> Any:
         if cmd.kind == Kind.POWER:
-            return await {
+            power_actions = {
                 "power_on": self.power_on,
                 "power_off": self.power_off,
                 "blank": self.blank,
                 "unblank": self.unblank,
-            }[cmd.action]()
+            }
+            action = power_actions.get(cmd.action or "")
+            if action is None:
+                raise ValueError(f"unknown power action {cmd.action!r}")
+            return await action()  # type: ignore[operator]  # union of () -> Awaitable
         if self.dry_run:
             log.info("[dry-run] %s: would run -%s %s", self.cfg.id, cmd.name, args)
             return "dry-run"

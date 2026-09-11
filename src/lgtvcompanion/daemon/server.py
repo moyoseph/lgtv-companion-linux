@@ -108,7 +108,10 @@ def _peer_creds(writer: asyncio.StreamWriter) -> str:
     try:
         import socket as socket_mod
         sock = writer.get_extra_info("socket")
-        creds = sock.getsockopt(socket_mod.SOL_SOCKET, socket_mod.SO_PEERCRED, 12)
+        creds = sock.getsockopt(
+            socket_mod.SOL_SOCKET,
+            socket_mod.SO_PEERCRED,  # type: ignore[attr-defined]  # Linux-only
+            12)
         import struct
         pid, uid, gid = struct.unpack("3i", creds)
         return f"pid={pid} uid={uid} gid={gid}"

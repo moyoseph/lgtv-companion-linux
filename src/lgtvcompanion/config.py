@@ -34,7 +34,8 @@ class IdleConfig:
     mute_speakers: bool = False
     veto_fullscreen: bool = True
     veto_mpris: str = "any"                 # any | foreground_only | off
-    ignored_keys: list[str] = field(default_factory=list)
+    # evdev key codes (int) or KEY_* names (str); parse_ignored_keys accepts both
+    ignored_keys: list[str | int] = field(default_factory=list)
     process_list: list[dict] = field(default_factory=list)
 
 

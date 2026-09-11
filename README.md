@@ -84,6 +84,14 @@ per invocation, trailing bare words select devices (none = all).
 | Auto-updater (MSI) | not applicable — use pip/pipx; version check planned |
 | RDP detection, NIC LUID binding, locale word lists | not applicable on Linux |
 
+## Documentation
+
+- [Install](docs/install.md) — system & user modes, ostree/SELinux notes
+- [Migration](docs/migration.md) — from Windows or a hand-rolled setup
+- [External API](docs/external-api.md) — event stream + scripting
+- [Parity matrix](docs/parity.md) — vs the Windows app
+- [Troubleshooting](docs/troubleshooting.md) — EACCES, WoL, suspend, and more
+
 ## License
 
 MIT. Portions of the design and the command/button tables are derived from
