@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import sys
 
 from .. import config as config_mod
@@ -41,7 +40,7 @@ def main() -> None:
     if not cfg.global_.mqtt.enabled:
         sys.exit("mqtt.enabled is false in the config — nothing to do")
 
-    socket_path = os.environ.get("LGTVC_SOCKET", ipc.DEFAULT_SOCKET)
+    socket_path = ipc.default_socket()
     if len(sys.argv) > 2 and sys.argv[1] == "--socket":
         socket_path = sys.argv[2]
     try:

@@ -13,9 +13,24 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from typing import Any
 
 DEFAULT_SOCKET = "/run/lgtv-companion/ipc.sock"
+
+
+def default_socket() -> str:
+    """Resolve the IPC socket path: explicit LGTVC_SOCKET wins; otherwise the
+    system socket (`/run/lgtv-companion/ipc.sock`) if present, else the per-user
+    runtime socket (`$XDG_RUNTIME_DIR/lgtv-companion/ipc.sock`) for user-mode
+    installs. Lets the CLI/agent/tray/mqtt find the daemon in either mode."""
+    env = os.environ.get("LGTVC_SOCKET")
+    if env:
+        return env
+    xdg = os.environ.get("XDG_RUNTIME_DIR")
+    if xdg and not os.path.exists(DEFAULT_SOCKET):
+        return f"{xdg}/lgtv-companion/ipc.sock"
+    return DEFAULT_SOCKET
 
 EVENTS = (
     "SYSTEM_DISPLAYS_OFF",

@@ -12,7 +12,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import os
 import sys
 import time
 
@@ -165,7 +164,7 @@ class Agent:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(name)s: %(message)s")
-    socket_path = os.environ.get("LGTVC_SOCKET", ipc.DEFAULT_SOCKET)
+    socket_path = ipc.default_socket()
     if len(sys.argv) > 1 and sys.argv[1] == "--socket":
         socket_path = sys.argv[2]
     try:

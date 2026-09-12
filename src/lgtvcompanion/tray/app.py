@@ -8,7 +8,6 @@ short-lived synchronous requests — no Qt/asyncio bridge needed.
 from __future__ import annotations
 
 import json
-import os
 import socket
 import sys
 
@@ -19,7 +18,7 @@ from .. import ipc
 def ipc_request(cmd: str, args: list | None = None,
                 devices: list[str] | None = None,
                 socket_path: str | None = None, timeout: float = 30.0) -> dict:
-    path = socket_path or os.environ.get("LGTVC_SOCKET", ipc.DEFAULT_SOCKET)
+    path = socket_path or ipc.default_socket()
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
         s.settimeout(timeout)
         s.connect(path)

@@ -113,6 +113,44 @@ WantedBy=sleep.target
 AGENT_UNIT = "lgtvc-agent.service"
 USER_UNIT_DIR = Path("/etc/systemd/user")
 
+# --- user-mode (no root) units: everything as `--user` services -------------
+# The daemon handles suspend/resume/shutdown itself (daemon_power_events) since
+# user units can't bind system sleep.target/poweroff.target.
+USER_DAEMON_UNIT_TEMPLATE = """\
+[Unit]
+Description=LGTV Companion daemon (user)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart={python_bin} -m lgtvcompanion.daemon.main --config {config_path}
+Restart=on-failure
+RestartSec=3
+RuntimeDirectory=lgtv-companion
+StateDirectory=lgtv-companion
+
+[Install]
+WantedBy=default.target
+"""
+
+USER_MQTT_UNIT_TEMPLATE = """\
+[Unit]
+Description=LGTV Companion MQTT / Home Assistant bridge (user)
+After=lgtvc-daemon.service network-online.target
+Wants=network-online.target
+BindsTo=lgtvc-daemon.service
+
+[Service]
+Type=simple
+ExecStart={python_bin} -m lgtvcompanion.mqtt.main
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+"""
+
 # Runs in the graphical session: /dev/input is readable there via the seat's
 # uaccess ACL, which the SELinux-confined system daemon is denied.
 AGENT_UNIT_TEMPLATE = """\
@@ -191,8 +229,8 @@ def _run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
 
 
 def cmd_install(args: argparse.Namespace) -> int:
-    if args.mode != "system":
-        sys.exit("only --mode system is implemented in v0.1")
+    if args.mode == "user":
+        return _install_user(args)
     if os.geteuid() != 0:
         sys.exit("system install needs root (sudo lgtvc setup install --mode system)")
     config_path = config_mod.SYSTEM_CONFIG
@@ -231,6 +269,49 @@ def cmd_install(args: argparse.Namespace) -> int:
         print(f"MQTT bridge unit installed — set mqtt.enabled in the config, then: "
               f"sudo systemctl enable --now {MQTT_UNIT}")
     print("next: lgtvc setup import-legacy   (or: lgtvc setup pair --host <tv-ip>)")
+    return 0
+
+
+def _install_user(args: argparse.Namespace) -> int:
+    """Per-user install (no root): all components as `--user` services; the
+    daemon handles power transitions via logind (daemon_power_events)."""
+    if os.geteuid() == 0:
+        sys.exit("user install must NOT be run as root — run as your login user")
+    unit_dir = Path.home() / ".config" / "systemd" / "user"
+    unit_dir.mkdir(parents=True, exist_ok=True)
+    config_path = config_mod.user_config_path()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    python_bin = _python_bin()
+
+    (unit_dir / DAEMON_UNIT).write_text(USER_DAEMON_UNIT_TEMPLATE.format(
+        python_bin=python_bin, config_path=config_path))
+    (unit_dir / AGENT_UNIT).write_text(AGENT_UNIT_TEMPLATE.format(python_bin=python_bin))
+    tray_available = _tray_available(python_bin)
+    if tray_available:
+        (unit_dir / TRAY_UNIT).write_text(TRAY_UNIT_TEMPLATE.format(python_bin=python_bin))
+    mqtt_available = _module_available(python_bin, "aiomqtt")
+    if mqtt_available:
+        (unit_dir / MQTT_UNIT).write_text(USER_MQTT_UNIT_TEMPLATE.format(
+            python_bin=python_bin))
+
+    # seed daemon_power_events=true so suspend/resume/shutdown are handled
+    # in-daemon (no system sleep/poweroff oneshots in user mode)
+    cfg = config_mod.load(config_path) if config_path.exists() else config_mod.Config()
+    cfg.global_.daemon_power_events = True
+    config_mod.save(cfg, config_path)
+
+    _run(["systemctl", "--user", "daemon-reload"], check=False)
+    _run(["systemctl", "--user", "enable", DAEMON_UNIT, AGENT_UNIT], check=False)
+    print(f"user units installed in {unit_dir}")
+    print("enable lingering so it runs without an active login:")
+    print(f"  loginctl enable-linger {os.environ.get('USER', 'you')}")
+    print("then: lgtvc setup pair --host <tv-ip>  and  "
+          "systemctl --user start lgtvc-daemon lgtvc-agent")
+    if tray_available:
+        print(f"tray: systemctl --user enable --now {TRAY_UNIT}")
+    if mqtt_available:
+        print(f"MQTT: set mqtt.enabled in {config_path}, then "
+              f"systemctl --user enable --now {MQTT_UNIT}")
     return 0
 
 

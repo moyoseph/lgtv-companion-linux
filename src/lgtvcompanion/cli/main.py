@@ -242,7 +242,7 @@ async def run_events(socket_path: str) -> int:
 
 
 def _socket_path(cli_value: str | None) -> str:
-    return cli_value or os.environ.get("LGTVC_SOCKET", ipc.DEFAULT_SOCKET)
+    return cli_value or ipc.default_socket()
 
 
 def main(argv: list[str] | None = None) -> None:
