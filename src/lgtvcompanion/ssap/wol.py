@@ -58,18 +58,37 @@ def subnet_broadcast(tv_ip: str) -> str:
     return "255.255.255.255"
 
 
+def interface_ip(ifname: str) -> str | None:
+    """The IPv4 source address of a named interface (for binding the WoL
+    socket to a specific NIC — multi-NIC / VPN). Linux-only."""
+    if not ifname or not sys.platform.startswith("linux"):
+        return None
+    import fcntl
+    packed = struct.pack("16sH14s", ifname.encode()[:16], socket.AF_INET, b"\0" * 14)
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            addr_res = fcntl.ioctl(s.fileno(), _SIOCGIFADDR, packed)
+        return socket.inet_ntoa(addr_res[20:24])
+    except OSError:
+        return None
+
+
 def send_wol(
     macs: list[str],
     tv_ip: str,
     *,
     method: str = "subnet",
     subnet_override: str | None = None,
+    interface: str | None = None,
+    extra_targets: list[str] | None = None,
 ) -> None:
     """Send one round of magic packets for every MAC.
 
     method: "broadcast" (255.255.255.255), "subnet" (directed broadcast +
     unicast to the TV IP — the proven combination), "directed" (unicast only),
-    "auto" (all of the above).
+    "auto" (all of the above). extra_targets are explicit addresses appended
+    for every method (e.g. a remote subnet's directed broadcast for
+    cross-subnet/VPN wake). interface binds the send socket to that NIC's IP.
     """
     targets: list[str] = []
     if method in ("broadcast", "auto"):
@@ -79,9 +98,19 @@ def send_wol(
         targets.append(tv_ip)
     if method in ("directed",):
         targets.append(tv_ip)
+    if extra_targets:
+        targets.extend(extra_targets)
 
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        if interface:
+            src = interface_ip(interface)
+            if src:
+                try:
+                    s.bind((src, 0))
+                except OSError as e:
+                    log.warning("WoL: could not bind to %s (%s): %s",
+                                interface, src, e)
         for mac in macs:
             packet = magic_packet(mac)
             for target in dict.fromkeys(targets):

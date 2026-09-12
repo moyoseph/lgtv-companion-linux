@@ -31,6 +31,7 @@ def user_state_path() -> Path:
 class IdleConfig:
     enabled: bool = False
     minutes: int = 10                       # 1-240
+    action: str = "blank"                   # blank | power_off (on idle timeout)
     mute_speakers: bool = False
     veto_fullscreen: bool = True
     veto_mpris: str = "any"                 # any | foreground_only | off
@@ -86,6 +87,10 @@ class GlobalConfig:
     mqtt: MqttConfig = field(default_factory=MqttConfig)
     on_lock: str = "none"                   # none | blank | off (on session lock)
     on_unlock: str = "none"                 # none | on (on session unlock)
+    # handle suspend/resume/shutdown inside the daemon via logind signals
+    # (user-mode installs, where system sleep/poweroff oneshot units aren't
+    # available); system installs leave this false and use the oneshot units
+    daemon_power_events: bool = False
     external_api: bool = True
     log_level: str = "info"
     update_check: str = "notify"            # notify | off
@@ -102,7 +107,10 @@ class DeviceConfig:
     ssl: bool = True
     wol_method: str = "subnet"              # broadcast | subnet | directed | auto
     subnet: str = "auto"
-    interface: str | None = None
+    interface: str | None = None            # NIC to send WoL from (multi-NIC/VPN)
+    # extra explicit WoL targets (e.g. a remote subnet's broadcast for
+    # cross-subnet/VPN wake); appended for every wol_method
+    wol_targets: list[str] = field(default_factory=list)
     persistent_connection: str = "keepalive"  # off | keep_open | keepalive
     source_hdmi_input: int | None = None
     check_hdmi_input_when_powering_off: bool = True
@@ -180,6 +188,12 @@ def validate(cfg: Config) -> list[str]:
         problems.append(f"on_lock {g.on_lock!r} not none|blank|off")
     if g.on_unlock not in ("none", "on"):
         problems.append(f"on_unlock {g.on_unlock!r} not none|on")
+    if g.idle.action not in ("blank", "power_off"):
+        problems.append(f"idle.action {g.idle.action!r} not blank|power_off")
+    if g.idle.veto_mpris not in ("any", "foreground_only", "off"):
+        problems.append(f"idle.veto_mpris {g.idle.veto_mpris!r} not any|foreground_only|off")
+    if g.update_check not in ("notify", "off"):
+        problems.append(f"update_check {g.update_check!r} not notify|off")
     ids = [d.id for d in cfg.devices]
     if len(ids) != len(set(ids)):
         problems.append("duplicate device ids")

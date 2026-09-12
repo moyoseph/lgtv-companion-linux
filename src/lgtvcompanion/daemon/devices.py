@@ -71,6 +71,8 @@ class DeviceSession:
             send_wol(
                 self.cfg.mac, self.cfg.host, method=self.cfg.wol_method,
                 subnet_override=None if self.cfg.subnet == "auto" else self.cfg.subnet,
+                interface=self.cfg.interface,
+                extra_targets=self.cfg.wol_targets or None,
             )
 
     async def connect(self, *, wake: bool = False, attempts: int | None = None) -> None:

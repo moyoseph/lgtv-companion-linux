@@ -72,6 +72,10 @@ def build_dialog(ipc_request):
             self.idle_minutes.setRange(1, 240)
             self.idle_minutes.setValue(g.idle.minutes)
             form.addRow("Idle timeout (minutes)", self.idle_minutes)
+            self.idle_action = QComboBox()
+            self.idle_action.addItems(["blank", "power_off"])
+            self.idle_action.setCurrentText(g.idle.action)
+            form.addRow("  On idle", self.idle_action)
             self.mute_speakers = QCheckBox()
             self.mute_speakers.setChecked(g.idle.mute_speakers)
             form.addRow("Mute speakers when blanked", self.mute_speakers)
@@ -147,6 +151,7 @@ def build_dialog(ipc_request):
             g = self.cfg.global_
             g.idle.enabled = self.idle_enabled.isChecked()
             g.idle.minutes = self.idle_minutes.value()
+            g.idle.action = self.idle_action.currentText()
             g.idle.mute_speakers = self.mute_speakers.isChecked()
             g.wake_on_input.enabled = self.wake_on_input.isChecked()
             g.power_on_at_boot = self.power_on_boot.isChecked()

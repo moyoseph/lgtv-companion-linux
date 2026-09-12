@@ -8,7 +8,7 @@
   "picturemode": {
     "Category": "picture",
     "Setting": "pictureMode",
-    "Argument": "cinema eco expert1 expert2 game normal photo sports technicolor vivid hdrEffect filmMaker hdrCinema hdrCinemaBright hdrExternal hdrGame hdrStandard hdrTechnicolor hdrVivid hdrFilmMaker dolbyHdrCinema dolbyHdrCinemaBright dolbyHdrDarkAmazon dolbyHdrGame dolbyHdrStandard dolbyHdrVivid dolbyStandard",
+    "Argument": "cinema eco expert1 expert2 game normal photo sports technicolor vivid hdrEffect filmMaker hdrCinema hdrCinemaBright hdrExternal hdrGame hdrStandard hdrTechnicolor hdrVivid hdrFilmMaker dolbyHdrCinema dolbyHdrCinemaBright dolbyHdrDarkAmazon dolbyHdrGame dolbyHdrStandard dolbyHdrVivid dolbyStandard dolbyHdrFilmMaker",
     "LogMessage": "set picture mode [#ARG#]"
   },
   "backlight": {

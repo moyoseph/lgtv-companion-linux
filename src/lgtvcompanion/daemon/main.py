@@ -17,7 +17,7 @@ from ..ssap.handshake import KeyStore
 from .devices import DeviceSession
 from .idle import IdleEngine
 from .network import wait_for_network
-from .power_events import connect_logind_manager
+from .power_events import PowerEvents, connect_logind_manager
 from .server import IpcServer
 from .streams import StreamController
 from .topology import TopologyWatcher
@@ -29,9 +29,11 @@ log = logging.getLogger("lgtvc-daemon")
 
 class Daemon:
     def __init__(self, cfg: config_mod.Config, keystore: KeyStore, socket_path: str,
-                 config_path: config_mod.Path | None = None):
+                 config_path: config_mod.Path | None = None,
+                 state_dir: config_mod.Path | None = None):
         self.cfg = cfg
         self._config_path = config_path
+        self._state_dir = state_dir or keystore.directory.parent
         self.dry_run = cfg.global_.dry_run
         self.sessions = [
             DeviceSession(d, keystore, dry_run=self.dry_run)
@@ -54,7 +56,22 @@ class Daemon:
             self.idle_engine = IdleEngine(
                 minutes=cfg.global_.idle.minutes, vetoes=self.vetoes,
                 on_idle=self._idle_blank, on_busy=self._idle_unblank)
+        self.power_events: PowerEvents | None = None
+        if cfg.global_.daemon_power_events:
+            self.power_events = PowerEvents(
+                on_suspend=lambda: self._power_all("off"),
+                on_resume=self.on_resume,
+                on_shutdown=lambda: self._power_all("off"),
+                on_reboot=self._noop)
         self._stopping = asyncio.Event()
+
+    async def _noop(self) -> None:
+        pass
+
+    async def on_resume(self) -> None:
+        for s in self._managed():
+            await wait_for_network(s.cfg.host)
+        await self._power_all("on")
 
     # -- device selection ------------------------------------------------------
 
@@ -120,29 +137,58 @@ class Daemon:
                          "present" if key in present_keys else "absent", result)
             except Exception as e:
                 log.error("%s: topology action failed: %s", s.cfg.id, e)
+        if self.cfg.global_.topology.keep_on_boot:
+            self._save_topology(present_keys)
+
+    def _topology_state_path(self) -> config_mod.Path:
+        return self._state_dir / "topology.json"
+
+    def _save_topology(self, present_keys: set[str]) -> None:
+        try:
+            import json
+            self._state_dir.mkdir(parents=True, exist_ok=True)
+            self._topology_state_path().write_text(json.dumps(sorted(present_keys)))
+        except OSError as e:
+            log.debug("could not persist topology: %s", e)
+
+    async def _restore_topology(self) -> None:
+        """At boot, re-apply the last-seen topology (keep_on_boot) so a
+        momentarily-absent display doesn't flip everything off."""
+        try:
+            import json
+            saved = set(json.loads(self._topology_state_path().read_text()))
+        except (OSError, ValueError):
+            return
+        log.info("restoring saved topology: %s", sorted(saved) or "(none)")
+        await self._on_topology_change(saved)
 
     async def _idle_blank(self) -> None:
         self.server.broadcast("SYSTEM_USER_IDLE")
+        power_off = self.cfg.global_.idle.action == "power_off"
         for s in self._managed():
             try:
-                result = await s.blank()
+                result = await (s.power_off() if power_off else s.blank())
                 if result == "blanked" and self.cfg.global_.idle.mute_speakers \
                         and not self.dry_run:
                     await s.client.request("audio/setMute", {"mute": True})
-                log.info("%s: idle blank -> %s", s.cfg.id, result)
+                log.info("%s: idle %s -> %s", s.cfg.id,
+                         "power-off" if power_off else "blank", result)
             except Exception as e:
-                log.error("%s: idle blank failed: %s", s.cfg.id, e)
+                log.error("%s: idle action failed: %s", s.cfg.id, e)
 
     async def _idle_unblank(self) -> None:
         self.server.broadcast("SYSTEM_USER_BUSY")
+        power_off = self.cfg.global_.idle.action == "power_off"
         for s in self._managed():
             try:
-                result = await s.unblank()
-                if self.cfg.global_.idle.mute_speakers and not self.dry_run:
+                # power_off idle → power the TV back on; blank idle → unblank
+                result = await (s.power_on() if power_off else s.unblank())
+                if not power_off and self.cfg.global_.idle.mute_speakers \
+                        and not self.dry_run:
                     await s.client.request("audio/setMute", {"mute": False})
-                log.info("%s: idle unblank -> %s", s.cfg.id, result)
+                log.info("%s: idle wake -> %s", s.cfg.id, result)
             except Exception as e:
-                log.error("%s: idle unblank failed: %s", s.cfg.id, e)
+                log.error("%s: idle wake failed: %s", s.cfg.id, e)
 
     async def _any_tv_reachable(self) -> bool:
         for s in self._managed():
@@ -170,9 +216,12 @@ class Daemon:
                 log.info("%s: power %s -> %s", s.cfg.id, action, r)
 
     async def on_boot(self) -> None:
-        # Suspend/resume and shutdown/reboot are handled by the lgtvc-sleep and
-        # lgtvc-shutdown oneshot units (see power_events.py for why not here);
-        # the daemon only powers on at its own start.
+        # Suspend/resume/shutdown are handled by the lgtvc-sleep/lgtvc-shutdown
+        # oneshot units (system mode) or PowerEvents (user mode); here the
+        # daemon powers on at start, and restores a saved topology if asked.
+        if self.cfg.global_.topology.enabled and self.cfg.global_.topology.keep_on_boot:
+            await self._restore_topology()
+            return
         if not self.cfg.global_.power_on_at_boot:
             return
         for s in self._managed():
@@ -300,6 +349,8 @@ class Daemon:
             self.idle_engine.start()
         if self.topology is not None:
             self.topology.start()
+        if self.power_events is not None:
+            await self.power_events.start()
         sdnotify.ready()
         sdnotify.status("running" + (" (dry-run)" if self.dry_run else ""))
         if self.dry_run:
@@ -309,6 +360,8 @@ class Daemon:
         await self._stopping.wait()
         sdnotify.stopping()
         # plain service stop (upgrade/restart): do not touch TV power
+        if self.power_events is not None:
+            await self.power_events.stop()
         if self.topology is not None:
             self.topology.stop()
         if self.idle_engine is not None:
@@ -347,7 +400,7 @@ def main() -> None:
         socket_path = os.path.join(runtime_dir.split(":")[0], "ipc.sock")
 
     daemon = Daemon(cfg, keystore, socket_path,
-                    config_path=config_mod.Path(cfg_path))
+                    config_path=config_mod.Path(cfg_path), state_dir=state_dir)
     asyncio.run(daemon.run())
 
 

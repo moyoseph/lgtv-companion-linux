@@ -47,7 +47,12 @@ class VetoEngine:
         if self.cfg.veto_fullscreen and state.get("fullscreen"):
             return f"fullscreen app: {state['fullscreen']}"
         if self.cfg.veto_mpris != "off" and state.get("mpris_playing"):
-            return "media playing (MPRIS)"
+            # "foreground_only": only veto when a fullscreen player is present
+            # (e.g. fullscreen video) — background music won't hold the TV on
+            if self.cfg.veto_mpris == "foreground_only" and not state.get("fullscreen"):
+                pass
+            else:
+                return "media playing (MPRIS)"
         reason = self._check_process_list()
         if reason:
             return reason
