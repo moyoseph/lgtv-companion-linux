@@ -49,6 +49,9 @@ class Agent:
         self._monitor = InputMonitor(self._on_input)
         self._send_queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=16)
         self._state: dict = {"mpris_playing": False, "fullscreen": None}
+        # streaming is the OR of all sources (sunshine log + process watch); the
+        # daemon consumes a single bool, so we only report the combined change.
+        self._stream_sources: dict[str, bool] = {}
 
     def _on_input(self, path: str, etype: int, code: int, value: int) -> None:
         if not self._filter.is_activity(path, etype, code, value):
@@ -102,28 +105,42 @@ class Agent:
         with contextlib.suppress(asyncio.QueueFull):
             self._send_queue.put_nowait({"locked": locked})
 
-    def _start_sunshine_watch(self) -> None:
-        from .streams import SunshineWatcher, find_sunshine_log
+    def _set_stream_source(self, name: str, active: bool) -> None:
+        self._stream_sources[name] = active
+        combined = any(self._stream_sources.values())
+        if combined != self._stream_sources.get("_combined"):
+            self._stream_sources["_combined"] = combined
+            with contextlib.suppress(asyncio.QueueFull):
+                self._send_queue.put_nowait({"streaming": combined})
+
+    def _start_stream_watch(self) -> None:
+        from .streams import (
+            ProcessStreamWatcher,
+            SunshineWatcher,
+            find_sunshine_log,
+        )
+        rs = None
         path = config_mod.find_config()
-        configured = "auto"
         if path is not None:
             try:
-                configured = config_mod.load(path).global_.remote_stream.sunshine_log
+                rs = config_mod.load(path).global_.remote_stream
             except (ValueError, OSError):
                 pass
-        log_path = find_sunshine_log(configured)
-        if log_path is None:
-            log.info("no sunshine.log found — stream detection off")
-            return
-        def on_change(streaming: bool) -> None:
-            with contextlib.suppress(asyncio.QueueFull):
-                self._send_queue.put_nowait({"streaming": streaming})
-        self._sunshine = SunshineWatcher(log_path, on_change)
-        self._sunshine.start()
+        log_path = find_sunshine_log(rs.sunshine_log if rs else "auto")
+        if log_path is not None:
+            self._sunshine = SunshineWatcher(
+                log_path, lambda s: self._set_stream_source("sunshine", s))
+            self._sunshine.start()
+        else:
+            log.info("no sunshine.log found — sunshine detection off")
+        if rs and rs.processes:
+            self._proc_stream = ProcessStreamWatcher(
+                rs.processes, lambda s: self._set_stream_source("process", s))
+            self._proc_stream.start()
 
     async def run(self) -> None:
         self._monitor.start()
-        self._start_sunshine_watch()
+        self._start_stream_watch()
         state_task = asyncio.create_task(self._state_loop())
         try:
             while True:

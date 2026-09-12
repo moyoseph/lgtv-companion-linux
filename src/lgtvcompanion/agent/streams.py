@@ -8,6 +8,7 @@ owns the reaction policy (blank/off on connect, restore on disconnect).
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import logging
 import re
 from collections.abc import Callable
@@ -22,6 +23,7 @@ DISCONNECT_RE = re.compile(r"CLIENT DISCONNECTED")
 DEFAULT_LOG_LOCATIONS = (
     "~/.config/sunshine/sunshine.log",
     "~/.var/app/dev.lizardbyte.app.Sunshine/config/sunshine/sunshine.log",
+    "~/.config/apollo/sunshine.log",   # Apollo (Sunshine fork, same log format)
 )
 
 
@@ -95,3 +97,50 @@ class SunshineWatcher:
                 None, self._read_new)
             if chunk:
                 self.process(chunk)
+
+
+def _running_process_names() -> set[str]:
+    names: set[str] = set()
+    for comm in Path("/proc").glob("[0-9]*/comm"):
+        try:
+            names.add(comm.read_text().strip().lower())
+        except OSError:
+            continue
+    return names
+
+
+class ProcessStreamWatcher:
+    """Detects a streaming host by process name — Parsec, Chrome Remote Desktop,
+    Apollo, a Moonlight host, etc. (upstream #266/#257). Polls /proc and
+    fnmatches configured globs; calls on_change(active) when the aggregate flips.
+    """
+
+    def __init__(self, patterns: list[str], on_change: Callable[[bool], None]):
+        self.patterns = [p.lower() for p in patterns]
+        self.on_change = on_change
+        self.active = False
+        self._task: asyncio.Task | None = None
+
+    def start(self) -> None:
+        self._task = asyncio.create_task(self._loop(), name="process-stream-watch")
+        log.info("watching for streaming processes: %s", ", ".join(self.patterns))
+
+    def stop(self) -> None:
+        if self._task is not None:
+            self._task.cancel()
+            self._task = None
+
+    def poll_once(self, names: set[str]) -> None:
+        active = any(fnmatch.fnmatch(n, pat)
+                     for n in names for pat in self.patterns)
+        if active != self.active:
+            self.active = active
+            log.info("streaming process %s", "detected" if active else "gone")
+            self.on_change(active)
+
+    async def _loop(self) -> None:
+        while True:
+            names = await asyncio.get_running_loop().run_in_executor(
+                None, _running_process_names)
+            self.poll_once(names)
+            await asyncio.sleep(POLL_INTERVAL)
