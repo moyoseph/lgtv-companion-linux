@@ -59,5 +59,9 @@ designed to run on immutable/ostree distros (Bazzite) and regular desktops.
   ostree+SELinux (see `docs/troubleshooting.md`).
 - Power-transition `SYSTEM_*` events are not emitted on the IPC bus (the
   oneshot units own those transitions); idle events are.
-- Steam Remote Play auto-detection and a GUI-less user-mode `setup install` are
-  planned.
+- Steam Remote Play has no dedicated auto-detector, but the generic
+  `remote_stream.processes` watch covers it (and Parsec/CRD/etc.) when
+  configured; Sunshine/Apollo are auto-detected.
+- Still planned: a GUI-less user-mode `setup install --mode user` (system mode
+  works today; user mode is ad-hoc via `--host`), and a version-check
+  notification (the `update_check` option is currently inert).

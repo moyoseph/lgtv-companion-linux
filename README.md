@@ -14,10 +14,11 @@ Jörgen Persson — designed to work on immutable distributions such as Bazzite
 
 | Component | Runs as | Job |
 |---|---|---|
-| `lgtvc-daemon` | system service | Owns TV websocket sessions and pairing keys; reacts to logind suspend/resume/shutdown (with delay inhibitors); Wake-on-LAN; wake-on-input; user-idle blanking; IPC socket for the CLI and scripting |
-| `lgtvc-agent` | user service | Session-side eyes: input activity (with mouse debounce, stick deadband, ignored keys) and MPRIS playback state — things the confined system daemon cannot see |
-| `lgtvc` | CLI | The full ~115-command surface, LGTVcli-compatible syntax; talks to the daemon, or straight to the TV with `--direct` |
-| `lgtvc-tray` | user service (optional) | Qt tray + settings UI (planned, v0.3) |
+| `lgtvc-daemon` | system service | Owns TV websocket sessions and pairing keys; boot power-on; Wake-on-LAN; wake-on-input; user-idle blanking + vetoes; remote-stream + lock reactions; display topology; IPC socket for the CLI and scripting. (Suspend/resume and shutdown are handled by short-lived `lgtvc-sleep`/`lgtvc-shutdown` oneshot units, not in-daemon.) |
+| `lgtvc-agent` | user service | Session-side eyes: input activity, MPRIS playback, KWin fullscreen, screen-lock and streaming-process detection — things the confined system daemon can't see — reported over IPC |
+| `lgtvc` | CLI | The full ~115-command surface, LGTVcli-compatible syntax; `status`/`reload`/`events`; talks to the daemon, or straight to the TV with `--direct` |
+| `lgtvc-tray` | user service (optional) | PySide6 tray + settings dialog (`[tray]` extra) |
+| `lgtvc-mqtt` | system service (optional) | MQTT / Home Assistant bridge (`[mqtt]` extra) |
 
 Reboot vs shutdown is detected **deterministically** via systemd
 (`PrepareForShutdownWithMetadata` + a `Conflicts=reboot.target` fallback unit):
