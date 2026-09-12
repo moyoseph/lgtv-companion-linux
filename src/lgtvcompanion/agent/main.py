@@ -82,6 +82,7 @@ class Agent:
             lock_watcher = ScreenLockWatcher(bus, self._on_lock_change)
             if not (await lock_watcher.available() and await lock_watcher.start()):
                 log.info("no screensaver on the session bus — lock detection off")
+            self._start_update_check(bus)
         except Exception as e:
             log.debug("session bus unavailable (%s); mpris/fullscreen/lock off", e)
 
@@ -104,6 +105,20 @@ class Agent:
     def _on_lock_change(self, locked: bool) -> None:
         with contextlib.suppress(asyncio.QueueFull):
             self._send_queue.put_nowait({"locked": locked})
+
+    def _start_update_check(self, bus) -> None:
+        path = config_mod.find_config()
+        mode = "notify"
+        if path is not None:
+            try:
+                mode = config_mod.load(path).global_.update_check
+            except (ValueError, OSError):
+                pass
+        if mode == "off":
+            return
+        from .update import UpdateChecker
+        self._updater = UpdateChecker(bus)
+        self._updater.start()
 
     def _set_stream_source(self, name: str, active: bool) -> None:
         self._stream_sources[name] = active

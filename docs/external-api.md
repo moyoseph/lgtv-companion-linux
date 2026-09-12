@@ -1,9 +1,30 @@
 # External API (scripting)
 
 The daemon exposes a small line-based (NDJSON) protocol on a Unix socket —
-`/run/lgtv-companion/ipc.sock` in system mode — for scripting. This is the
-Linux replacement for the Windows named-pipe API, using the same `SYSTEM_*`
-event vocabulary.
+`/run/lgtv-companion/ipc.sock` in system mode (`$XDG_RUNTIME_DIR/lgtv-companion/ipc.sock`
+in user mode) — for scripting. This is the Linux replacement for the Windows
+named-pipe API, using the same `SYSTEM_*` event vocabulary.
+
+## Remote-streaming integrations
+
+When you stream your desktop to another device you usually want the local TV
+off/blanked. Three ways to drive that:
+
+- **Sunshine / Apollo** — auto-detected: the agent tails `sunshine.log` for
+  `CLIENT CONNECTED/DISCONNECTED`. Just set `remote_stream.enabled: true`.
+- **Other clients by process** (Parsec, Chrome Remote Desktop, Moonlight host, …)
+  — add name globs to `remote_stream.processes`, e.g.
+  `["parsec*", "chrome-remote-desktop*", "moonlight*"]`. The agent matches both
+  the short `comm` and the full `argv[0]` basename.
+- **Steam Remote Play / anything scriptable** — Steam's host process isn't
+  reliably distinguishable from an idle Steam, so there's no auto-detector.
+  Instead call the hooks from a wrapper or launch options:
+  ```sh
+  lgtvc -streaming_connect      # blank/off the TV per remote_stream.on_connect
+  # … your streaming session …
+  lgtvc -streaming_disconnect   # restore per remote_stream.on_disconnect
+  ```
+  (`on_disconnect` = `on` | `keep_off` | `restore`.)
 
 ## Subscribe to events
 
