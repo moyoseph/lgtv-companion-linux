@@ -1,5 +1,26 @@
 # Troubleshooting
 
+## Pairing fails on webOS 2025/2026 (`403 blacklisted certificate detected`), or buttons stop working (`401 insufficient permissions`)
+
+webOS firmware 43.00.92+ blacklisted the long-published "LG Remote App" signed
+manifest. Apps that still send it either fail to pair (`403 blacklisted
+certificate detected`) or pair but are denied elevated permissions — the
+pointer-input/button socket then fails with `401 insufficient permissions`
+(upstream issue #351).
+
+This port uses the modern **signature-free generic manifest** (see
+`ssap/handshake.py`), which pairs cleanly and is granted the full permission
+set via the on-screen prompt on webOS 2025/2026 and older firmware alike — so
+you shouldn't hit this. If you paired with an older build (or another app's
+blacklisted key) and see `401 insufficient permissions`, just re-pair:
+
+```sh
+sudo lgtvc setup pair --host <tv-ip>     # approve the prompt on the TV
+```
+
+An existing, already-trusted key keeps working after the manifest change (no
+re-pair needed) — re-pairing is only required if a command reports 401.
+
 ## The daemon can't reach the TV: `unreachable … [Errno 13] Permission denied`
 
 If `lgtvc -poweron` (via the daemon) returns EACCES on every attempt, but

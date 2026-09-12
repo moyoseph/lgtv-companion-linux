@@ -9,6 +9,15 @@ First public pre-release. A feature-parity Linux port of
 [LGTV Companion](https://github.com/JPersson77/LGTVCompanion) for Windows,
 designed to run on immutable/ostree distros (Bazzite) and regular desktops.
 
+### Fixed
+- **webOS 2025/2026 pairing** (upstream #351): switched the pairing handshake to
+  the signature-free generic manifest. The old signed "LG Remote App" manifest
+  is blacklisted by firmware 43.00.92+ (`403 blacklisted certificate detected`,
+  or pairs but denies the button/pointer socket with `401`). The generic
+  manifest pairs cleanly and is granted the full permission set via the on-screen
+  prompt on new and old firmware. Verified on a webOS-2025 B4. A clear
+  re-pair hint is raised on any `401 insufficient permissions`.
+
 ### Added
 - **Daemon** (`lgtvc-daemon`): owns TV SSAP websocket sessions and pairing
   keys, boot power-on, Wake-on-LAN, wake-on-input, user-idle blanking, and a

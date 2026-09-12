@@ -40,6 +40,13 @@ class KeyRejected(SsapError):
     """Stored client key was not accepted; re-pairing is required."""
 
 
+class InsufficientPermissions(SsapError):
+    """TV granted the key but withheld an elevated permission (webOS 2025+
+    "401 insufficient permissions"). The key was paired with a blacklisted/
+    signed manifest — re-pair to get the generic manifest's full grant. See
+    handshake.py and upstream issue #351."""
+
+
 def _ssl_context() -> ssl.SSLContext:
     # TVs present self-signed certs; upstream and the legacy setup both skip
     # verification, and the LAN threat model matches.
@@ -208,7 +215,13 @@ class SsapClient:
         if resp.get("type") == "error":
             if benign_errors and rpayload.get("errorCode") in BENIGN_ERROR_CODES:
                 return rpayload
-            raise SsapError(f"{uri}: {resp.get('error', rpayload)}", rpayload)
+            err_text = str(resp.get("error", rpayload))
+            if "401" in err_text or "insufficient permission" in err_text.lower():
+                raise InsufficientPermissions(
+                    f"{uri}: {err_text} — key lacks elevated permissions; "
+                    "re-pair with `lgtvc setup pair` (webOS 2025+, see #351)",
+                    rpayload)
+            raise SsapError(f"{uri}: {err_text}", rpayload)
         return rpayload
 
     async def subscribe(

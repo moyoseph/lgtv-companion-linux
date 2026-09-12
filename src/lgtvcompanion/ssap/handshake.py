@@ -1,13 +1,27 @@
-"""SSAP pairing: registration payload and client-key persistence."""
+"""SSAP pairing: registration payload and client-key persistence.
+
+webOS firmware 43.00.92+ (webOS 2025/2026) blacklisted the long-published
+"LG Remote App" signed manifest (appId com.lge.test) — pairing with it now
+fails "403 blacklisted certificate detected", and even where it pairs the
+elevated permissions (e.g. the pointer-input/button socket) are withheld
+(401). See upstream issue #351.
+
+The fix (matching upstream LGTVC v5.5.0+ and every maintained webOS client
+lib): send a **signature-free, generic** manifest — no `signed`/`signatures`
+blocks — with all requested permissions in the outer `permissions` list. The
+signed block existed only so LG-certified apps could skip the on-screen
+prompt via signature verification; without it the user simply approves the
+outer permissions at the PROMPT. This generic manifest is accepted on every
+webOS version (old and new) and grants the full permission set.
+"""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-# LG-issued signed manifest (appId com.lge.test). The signature must be sent
-# verbatim or the TV rejects the pairing prompt for unknown clients.
+# Generic, signature-free manifest (upstream "V3"). Full outer-permission set,
+# granted via the on-screen PROMPT. Works on webOS 2025/2026 and earlier.
 MANIFEST = {
-    "appVersion": "1.1",
     "manifestVersion": 1,
     "permissions": [
         "LAUNCH", "LAUNCH_WEBAPP", "APP_TO_APP", "CLOSE",
@@ -17,39 +31,10 @@ MANIFEST = {
         "CONTROL_TV_SCREEN", "READ_APP_STATUS", "READ_CURRENT_CHANNEL",
         "READ_INPUT_DEVICE_LIST", "READ_NETWORK_STATE", "READ_RUNNING_APPS",
         "READ_TV_CHANNEL_LIST", "WRITE_NOTIFICATION_TOAST", "READ_POWER_STATE",
-        "READ_COUNTRY_INFO", "CONTROL_INPUT_TEXT", "CONTROL_MOUSE_AND_KEYBOARD",
-        "READ_INSTALLED_APPS", "READ_SETTINGS", "READ_STORAGE_DEVICE_LIST",
+        "READ_COUNTRY_INFO", "READ_SETTINGS", "CONTROL_INPUT_TEXT",
+        "CONTROL_MOUSE_AND_KEYBOARD", "WRITE_SETTINGS", "WRITE_NOTIFICATION_ALERT",
+        "READ_INSTALLED_APPS", "READ_UPDATE_INFO",
     ],
-    "signatures": [{"signature": (
-        "eyJhbGdvcml0aG0iOiJSU0EtU0hBMjU2Iiwia2V5SWQiOiJ0ZXN0LXNpZ25pbm"
-        "ctY2VydCIsInNpZ25hdHVyZVZlcnNpb24iOjF9.hrVRgjCwXVvE2OOSpDZ58hR"
-        "+59aFNwYDyjQgKk3auukd7pcegmE2CzPCa0bJ0ZsRAcKkCTJrWo5iDzNhMBWRy"
-        "aMOv5zWSrthlf7G128qvIlpMT0YNY+n/FaOHE73uLrS/g7swl3/qH/BGFG2Hu4"
-        "RlL48eb3lLKqTt2xKHdCs6Cd4RMfJPYnzgvI4BNrFUKsjkcu+WD4OO2A27Pq1n"
-        "50cMchmcaXadJhGrOqH5YmHdOCj5NSHzJYrsW0HPlpuAx/ECMeIZYDh6RMqaFM"
-        "2DXzdKX9NmmyqzJ3o/0lkk/N97gfVRLW5hA29yeAwaCViZNCP8iC9aO0q9fQoj"
-        "oa7NQnAtw=="
-    ), "signatureVersion": 1}],
-    "signed": {
-        "appId": "com.lge.test",
-        "created": "20140509",
-        "localizedAppNames": {
-            "": "LG Remote App",
-            "ko-KR": "리모컨 앱",
-            "zxx-XX": "ЛГ Rэмotэ AПП",
-        },
-        "localizedVendorNames": {"": "LG Electronics"},
-        "permissions": [
-            "TEST_SECURE", "CONTROL_INPUT_TEXT", "CONTROL_MOUSE_AND_KEYBOARD",
-            "READ_INSTALLED_APPS", "READ_LGE_SDX", "READ_NOTIFICATIONS",
-            "SEARCH", "WRITE_SETTINGS", "WRITE_NOTIFICATION_ALERT",
-            "CONTROL_POWER", "READ_CURRENT_CHANNEL", "READ_RUNNING_APPS",
-            "READ_UPDATE_INFO", "UPDATE_FROM_REMOTE_APP",
-            "READ_LGE_TV_INPUT_EVENTS", "READ_TV_CURRENT_TIME",
-        ],
-        "serial": "2f930e2d2cfe083771f68e4fe7bb07",
-        "vendorId": "com.lge",
-    },
 }
 
 
