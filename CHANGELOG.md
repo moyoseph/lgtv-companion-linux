@@ -3,9 +3,9 @@
 All notable changes to this project are documented here. This project adheres
 to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.0] — 2026-09-12
 
-First public pre-release. A feature-parity Linux port of
+First public release. A feature-parity Linux port of
 [LGTV Companion](https://github.com/JPersson77/LGTVCompanion) for Windows,
 designed to run on immutable/ostree distros (Bazzite) and regular desktops.
 
