@@ -100,12 +100,23 @@ class SunshineWatcher:
 
 
 def _running_process_names() -> set[str]:
+    """Lowercased process names to match against. Includes both /proc/PID/comm
+    (truncated to 15 chars by the kernel) AND the basename of argv[0] from
+    /proc/PID/cmdline (untruncated) — otherwise long names like
+    "chrome-remote-desktop" would only appear truncated and miss the glob."""
     names: set[str] = set()
-    for comm in Path("/proc").glob("[0-9]*/comm"):
+    for pid_dir in Path("/proc").glob("[0-9]*"):
         try:
-            names.add(comm.read_text().strip().lower())
+            names.add((pid_dir / "comm").read_text().strip().lower())
+        except OSError:
+            pass
+        try:
+            argv0 = (pid_dir / "cmdline").read_bytes().split(b"\0", 1)[0]
+            if argv0:
+                names.add(argv0.decode(errors="replace").rsplit("/", 1)[-1].lower())
         except OSError:
             continue
+    names.discard("")
     return names
 
 
