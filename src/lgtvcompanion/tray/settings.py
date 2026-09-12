@@ -45,7 +45,7 @@ def build_dialog(ipc_request):
 
             tabs = QTabWidget()
             tabs.addTab(self._global_tab(QWidget, QFormLayout, QCheckBox,
-                                         QSpinBox, QComboBox), "General")
+                                         QSpinBox, QComboBox, QLineEdit), "General")
             tabs.addTab(self._devices_tab(QWidget, QVBoxLayout, QFormLayout,
                                           QLineEdit, QCheckBox, QSpinBox,
                                           QComboBox, QLabel), "Devices")
@@ -60,7 +60,8 @@ def build_dialog(ipc_request):
             root.addWidget(buttons)
             self._msgbox = QMessageBox
 
-        def _global_tab(self, QWidget, QFormLayout, QCheckBox, QSpinBox, QComboBox):
+        def _global_tab(self, QWidget, QFormLayout, QCheckBox, QSpinBox,
+                        QComboBox, QLineEdit):
             g = self.cfg.global_
             w = QWidget()
             form = QFormLayout(w)
@@ -91,6 +92,16 @@ def build_dialog(ipc_request):
             self.on_disconnect.addItems(["on", "keep_off", "restore"])
             self.on_disconnect.setCurrentText(g.remote_stream.on_disconnect)
             form.addRow("  On stream end", self.on_disconnect)
+            self.stream_processes = QLineEdit(", ".join(g.remote_stream.processes))
+            form.addRow("  Also detect processes", self.stream_processes)
+            self.on_lock = QComboBox()
+            self.on_lock.addItems(["none", "blank", "off"])
+            self.on_lock.setCurrentText(g.on_lock)
+            form.addRow("On screen lock", self.on_lock)
+            self.on_unlock = QComboBox()
+            self.on_unlock.addItems(["none", "on"])
+            self.on_unlock.setCurrentText(g.on_unlock)
+            form.addRow("On screen unlock", self.on_unlock)
             self.topology = QCheckBox()
             self.topology.setChecked(g.topology.enabled)
             form.addRow("Display-topology mode", self.topology)
@@ -142,6 +153,10 @@ def build_dialog(ipc_request):
             g.remote_stream.enabled = self.remote_stream.isChecked()
             g.remote_stream.on_connect = self.on_connect.currentText()
             g.remote_stream.on_disconnect = self.on_disconnect.currentText()
+            g.remote_stream.processes = [
+                p.strip() for p in self.stream_processes.text().split(",") if p.strip()]
+            g.on_lock = self.on_lock.currentText()
+            g.on_unlock = self.on_unlock.currentText()
             g.topology.enabled = self.topology.isChecked()
             for dev, name, host, mac, ssl, hdmi, guard, wol in self.device_widgets:
                 dev.name = name.text().strip()

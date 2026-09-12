@@ -45,6 +45,9 @@ class RemoteStreamConfig:
     on_connect: str = "blank"               # off | blank
     on_disconnect: str = "on"               # on | keep_off | restore
     sunshine_log: str = "auto"
+    # process-name globs to also treat as an active stream (Parsec, Chrome
+    # Remote Desktop, Apollo, Moonlight host, …) — detected by the agent
+    processes: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -67,6 +70,8 @@ class GlobalConfig:
     remote_stream: RemoteStreamConfig = field(default_factory=RemoteStreamConfig)
     topology: TopologyConfig = field(default_factory=TopologyConfig)
     wake_on_input: WakeOnInputConfig = field(default_factory=WakeOnInputConfig)
+    on_lock: str = "none"                   # none | blank | off (on session lock)
+    on_unlock: str = "none"                 # none | on (on session unlock)
     external_api: bool = True
     log_level: str = "info"
     update_check: str = "notify"            # notify | off
@@ -155,6 +160,10 @@ def validate(cfg: Config) -> list[str]:
         problems.append(f"power_on_timeout {g.power_on_timeout} outside 5-100")
     if not 1 <= g.idle.minutes <= 240:
         problems.append(f"idle.minutes {g.idle.minutes} outside 1-240")
+    if g.on_lock not in ("none", "blank", "off"):
+        problems.append(f"on_lock {g.on_lock!r} not none|blank|off")
+    if g.on_unlock not in ("none", "on"):
+        problems.append(f"on_unlock {g.on_unlock!r} not none|on")
     ids = [d.id for d in cfg.devices]
     if len(ids) != len(set(ids)):
         problems.append("duplicate device ids")

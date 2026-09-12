@@ -81,6 +81,8 @@ class Daemon:
             handler = (self.streams.on_connect if report["streaming"]
                        else self.streams.on_disconnect)
             asyncio.get_running_loop().create_task(handler("agent"))
+        if "locked" in report:
+            asyncio.get_running_loop().create_task(self._on_lock(report["locked"]))
         if report.get("activity") or report.get("input_event"):
             if self.idle_engine is not None:
                 self.idle_engine.notify_activity()
@@ -90,6 +92,19 @@ class Daemon:
             if (report.get("key", True) and self.wake_on_input is not None
                     and not any(s.busy for s in self.sessions)):
                 self.wake_on_input.notify_input()
+
+    async def _on_lock(self, locked: bool) -> None:
+        action = self.cfg.global_.on_lock if locked else self.cfg.global_.on_unlock
+        if action == "none":
+            return
+        verb = {"blank": "blank", "off": "power_off", "on": "power_on"}[action]
+        log.info("session %s -> %s", "locked" if locked else "unlocked", action)
+        for s in self._managed():
+            try:
+                await getattr(s, verb)()
+            except Exception as e:
+                log.error("%s: on-%s action failed: %s",
+                          s.cfg.id, "lock" if locked else "unlock", e)
 
     async def _on_topology_change(self, present_keys: set[str]) -> None:
         for s in self._managed():

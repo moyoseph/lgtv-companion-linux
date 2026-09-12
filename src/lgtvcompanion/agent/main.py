@@ -65,6 +65,7 @@ class Agent:
         from dbus_fast.aio import MessageBus
 
         from .fullscreen import FullscreenProbe
+        from .lock import ScreenLockWatcher
         from .mpris import mpris_any_playing
 
         bus = None
@@ -75,8 +76,11 @@ class Agent:
             if not await fs_probe.available():
                 log.info("KWin not on the session bus — fullscreen veto disabled")
                 fs_probe = None
+            lock_watcher = ScreenLockWatcher(bus, self._on_lock_change)
+            if not (await lock_watcher.available() and await lock_watcher.start()):
+                log.info("no screensaver on the session bus — lock detection off")
         except Exception as e:
-            log.debug("session bus unavailable (%s); mpris/fullscreen off", e)
+            log.debug("session bus unavailable (%s); mpris/fullscreen/lock off", e)
 
         while True:
             await asyncio.sleep(STATE_REPORT_INTERVAL)
@@ -93,6 +97,10 @@ class Agent:
                 self._state = state
                 with contextlib.suppress(asyncio.QueueFull):
                     self._send_queue.put_nowait(dict(state))
+
+    def _on_lock_change(self, locked: bool) -> None:
+        with contextlib.suppress(asyncio.QueueFull):
+            self._send_queue.put_nowait({"locked": locked})
 
     def _start_sunshine_watch(self) -> None:
         from .streams import SunshineWatcher, find_sunshine_log
