@@ -3,6 +3,37 @@
 All notable changes to this project are documented here. This project adheres
 to [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] — 2026-09-12
+
+Feature release addressing the remaining gaps and several upstream requests.
+
+### Added
+- **User-mode install** (`lgtvc setup install --mode user`): all components as
+  `--user` systemd units under XDG paths, no root; the daemon handles
+  suspend/resume/shutdown itself via logind (`daemon_power_events`).
+- **MQTT bridge / Home Assistant** already shipped in 0.1.0; 0.2.0 adds a cached
+  per-device `power_state` to `lgtvc status` (drives the HA power sensor).
+- **Idle → power-off** option (`idle.action: blank | power_off`).
+- **Version-check notification** (`update_check: notify`): the agent checks the
+  GitHub releases API daily and posts a desktop notification when a newer
+  release exists (never downloads).
+- **Cross-subnet / VPN Wake-on-LAN**: per-device `wol_targets` (explicit
+  broadcast/unicast addresses) and `interface` (bind WoL to a NIC).
+- `dolbyHdrFilmMaker` added to `-picturemode` (#287).
+
+### Changed / fixed
+- Wired up previously-inert config: `topology.keep_on_boot` (persist + restore
+  the last topology), per-device `interface`, and `idle.veto_mpris=foreground_only`
+  (veto only when playback is in a fullscreen app).
+- `ipc.default_socket()` resolves the system vs `$XDG_RUNTIME_DIR` socket so the
+  CLI/agent/tray/mqtt find the daemon in either install mode.
+- Docs: streaming-integrations section (Sunshine/Apollo auto, process globs for
+  Parsec/Chrome Remote Desktop, `-streaming_connect/-disconnect` for Steam);
+  corrected stale component/parity tables.
+- Model-specific settings without a stable public key (e.g. oledCareMode #350,
+  screensaver clock #373) are set via the generic `-settings_other`/`-request`
+  escape hatch rather than shipping guessed commands.
+
 ## [0.1.0] — 2026-09-12
 
 First public release. A feature-parity Linux port of
