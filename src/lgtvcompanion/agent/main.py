@@ -52,6 +52,7 @@ class Agent:
         # streaming is the OR of all sources (sunshine log + process watch); the
         # daemon consumes a single bool, so we only report the combined change.
         self._stream_sources: dict[str, bool] = {}
+        self._stream_combined = False
 
     def _on_input(self, path: str, etype: int, code: int, value: int) -> None:
         if not self._filter.is_activity(path, etype, code, value):
@@ -108,8 +109,8 @@ class Agent:
     def _set_stream_source(self, name: str, active: bool) -> None:
         self._stream_sources[name] = active
         combined = any(self._stream_sources.values())
-        if combined != self._stream_sources.get("_combined"):
-            self._stream_sources["_combined"] = combined
+        if combined != self._stream_combined:
+            self._stream_combined = combined
             with contextlib.suppress(asyncio.QueueFull):
                 self._send_queue.put_nowait({"streaming": combined})
 
