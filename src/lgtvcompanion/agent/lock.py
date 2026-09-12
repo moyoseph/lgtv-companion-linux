@@ -28,7 +28,7 @@ class ScreenLockWatcher:
     def __init__(self, bus: MessageBus, on_change: Callable[[bool], None]):
         self.bus = bus
         self.on_change = on_change
-        self._iface = None
+        self._iface: object = None
 
     async def available(self) -> bool:
         try:
@@ -47,7 +47,8 @@ class ScreenLockWatcher:
                 introspection = await self.bus.introspect(SCREENSAVER, path)
                 obj = self.bus.get_proxy_object(SCREENSAVER, path, introspection)
                 iface = obj.get_interface(SCREENSAVER)
-                iface.on_active_changed(self._on_active_changed)
+                # dbus-fast generates on_<signal> handlers from introspection
+                iface.on_active_changed(self._on_active_changed)  # type: ignore[attr-defined]
                 self._iface = iface
                 log.info("watching screen lock via %s %s", SCREENSAVER, path)
                 return True

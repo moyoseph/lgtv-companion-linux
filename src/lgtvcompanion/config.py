@@ -63,6 +63,19 @@ class TopologyConfig:
 
 
 @dataclass
+class MqttConfig:
+    enabled: bool = False
+    host: str = "localhost"
+    port: int = 1883
+    username: str = ""
+    password: str = ""
+    topic_prefix: str = "lgtvc"
+    discovery: bool = True                  # publish Home Assistant MQTT discovery
+    discovery_prefix: str = "homeassistant"
+    client_id: str = "lgtvc-bridge"
+
+
+@dataclass
 class GlobalConfig:
     power_on_timeout: int = 40              # 5-100 s
     power_on_at_boot: bool = True
@@ -70,6 +83,7 @@ class GlobalConfig:
     remote_stream: RemoteStreamConfig = field(default_factory=RemoteStreamConfig)
     topology: TopologyConfig = field(default_factory=TopologyConfig)
     wake_on_input: WakeOnInputConfig = field(default_factory=WakeOnInputConfig)
+    mqtt: MqttConfig = field(default_factory=MqttConfig)
     on_lock: str = "none"                   # none | blank | off (on session lock)
     on_unlock: str = "none"                 # none | on (on session unlock)
     external_api: bool = True
@@ -134,6 +148,8 @@ def _from_dict(cls, data: dict):
             value = _from_dict(TopologyConfig, value)
         elif attr == "wake_on_input":
             value = _from_dict(WakeOnInputConfig, value)
+        elif attr == "mqtt":
+            value = _from_dict(MqttConfig, value)
         elif attr == "devices":
             value = [_from_dict(DeviceConfig, d) for d in value]
         kwargs[attr] = value

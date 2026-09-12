@@ -25,13 +25,15 @@ dependencies = [
 
 [project.optional-dependencies]
 tray = ["PySide6>=6.7"]
-dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6", "mypy>=1.11"]
+mqtt = ["aiomqtt>=2"]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6", "mypy>=1.11", "aiomqtt>=2"]
 
 [project.scripts]
 lgtvc = "lgtvcompanion.cli.main:main"
 lgtvc-daemon = "lgtvcompanion.daemon.main:main"
 lgtvc-agent = "lgtvcompanion.agent.main:main"
 lgtvc-tray = "lgtvcompanion.tray.app:main"
+lgtvc-mqtt = "lgtvcompanion.mqtt.main:main"
 
 [project.urls]
 # TODO(publish): set OWNER to the real GitHub account before the first release

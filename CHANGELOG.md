@@ -18,6 +18,16 @@ designed to run on immutable/ostree distros (Bazzite) and regular desktops.
   prompt on new and old firmware. Verified on a webOS-2025 B4. A clear
   re-pair hint is raised on any `401 insufficient permissions`.
 
+### Added (addressing upstream feature requests)
+- **MQTT / Home Assistant bridge** (`lgtvc-mqtt`, optional `[mqtt]` extra): publishes
+  per-TV power/screen/input/state/idle with Home Assistant MQTT auto-discovery and
+  accepts commands — the community's most-requested automation path, which upstream
+  has no first-party equivalent for. See `docs/mqtt.md`.
+- **Session lock/unlock → TV** (#288): blank or power off the TV when the screen
+  locks and restore on unlock (`on_lock`/`on_unlock`), via `org.freedesktop.ScreenSaver`.
+- **Generic remote-stream detection** (#266 Parsec, #257 Chrome Remote Desktop,
+  Apollo): configurable process-watch list in addition to the Sunshine log tail.
+
 ### Added
 - **Daemon** (`lgtvc-daemon`): owns TV SSAP websocket sessions and pairing
   keys, boot power-on, Wake-on-LAN, wake-on-input, user-idle blanking, and a

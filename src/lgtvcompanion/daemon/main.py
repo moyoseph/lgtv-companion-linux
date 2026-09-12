@@ -238,7 +238,9 @@ class Daemon:
             "streaming": self.streams.streaming,
             "devices": {
                 s.cfg.id: {"name": s.cfg.name, "auto_enabled": s.auto_enabled,
-                           "connected": s.client.connected}
+                           "connected": s.client.connected,
+                           "power_state": s.power_state,
+                           "source_hdmi_input": s.cfg.source_hdmi_input}
                 for s in self.sessions},
         }
 

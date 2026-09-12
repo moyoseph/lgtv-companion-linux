@@ -17,7 +17,29 @@ from ..ssap.handshake import KeyStore
 DAEMON_UNIT = "lgtvc-daemon.service"
 SHUTDOWN_UNIT = "lgtvc-shutdown.service"
 SLEEP_UNIT = "lgtvc-sleep.service"
+MQTT_UNIT = "lgtvc-mqtt.service"
 SYSTEM_UNIT_DIR = Path("/etc/systemd/system")
+
+# Optional MQTT/Home Assistant bridge. System service (needs the /run IPC
+# socket + broker creds, must run without a login). python -m, like the daemon.
+MQTT_UNIT_TEMPLATE = """\
+[Unit]
+Description=LGTV Companion MQTT / Home Assistant bridge
+After=lgtvc-daemon.service network-online.target
+Wants=network-online.target
+BindsTo=lgtvc-daemon.service
+
+[Service]
+Type=simple
+{user_line}ExecStart={python_bin} -m lgtvcompanion.mqtt.main
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+"""
 
 DAEMON_UNIT_TEMPLATE = """\
 [Unit]
@@ -150,13 +172,17 @@ def _python_bin() -> str:
     return sys.executable
 
 
-def _tray_available(python_bin: str) -> bool:
+def _module_available(python_bin: str, module: str) -> bool:
     try:
-        subprocess.run([python_bin, "-c", "import PySide6"],
+        subprocess.run([python_bin, "-c", f"import {module}"],
                        check=True, capture_output=True)
         return True
     except (subprocess.CalledProcessError, OSError):
         return False
+
+
+def _tray_available(python_bin: str) -> bool:
+    return _module_available(python_bin, "PySide6")
 
 
 def _run(cmd: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
@@ -179,6 +205,10 @@ def cmd_install(args: argparse.Namespace) -> int:
         python_bin=python_bin, config_path=config_path))
     (SYSTEM_UNIT_DIR / SLEEP_UNIT).write_text(SLEEP_UNIT_TEMPLATE.format(
         python_bin=python_bin, config_path=config_path))
+    mqtt_available = _module_available(python_bin, "aiomqtt")
+    if mqtt_available:
+        (SYSTEM_UNIT_DIR / MQTT_UNIT).write_text(MQTT_UNIT_TEMPLATE.format(
+            python_bin=python_bin, user_line=user_line))
     USER_UNIT_DIR.mkdir(parents=True, exist_ok=True)
     (USER_UNIT_DIR / AGENT_UNIT).write_text(AGENT_UNIT_TEMPLATE.format(
         python_bin=python_bin))
@@ -197,6 +227,9 @@ def cmd_install(args: argparse.Namespace) -> int:
     else:
         print("tray not installed (PySide6 missing) — "
               "pip install 'lgtvcompanion[tray]' then re-run setup install")
+    if mqtt_available:
+        print(f"MQTT bridge unit installed — set mqtt.enabled in the config, then: "
+              f"sudo systemctl enable --now {MQTT_UNIT}")
     print("next: lgtvc setup import-legacy   (or: lgtvc setup pair --host <tv-ip>)")
     return 0
 

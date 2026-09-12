@@ -32,6 +32,7 @@ class DeviceSession:
         self.keystore = keystore
         self.dry_run = dry_run
         self.auto_enabled = True   # -autodisable flips this until restart
+        self.power_state = "Unknown"  # last observed; surfaced in `status` for MQTT/HA
         self.client = self._new_client()
         self._keepalive: asyncio.Task | None = None
         self._lock = asyncio.Lock()
@@ -139,11 +140,14 @@ class DeviceSession:
         while True:
             await asyncio.sleep(KEEPALIVE_INTERVAL)
             if not self.client.connected:
+                self.power_state = "Unknown"
                 return
             try:
-                await power.get_power_state(self.client)
+                state = await power.get_power_state(self.client)
+                self.power_state = state.value
             except (ConnectionError, TimeoutError, Exception) as e:
                 log.debug("%s: keepalive ping failed: %s", self.cfg.id, e)
+                self.power_state = "Unknown"
                 await self.client.close()
                 return
 
@@ -178,6 +182,7 @@ class DeviceSession:
             set_hdmi_input=self.cfg.set_hdmi_input if set_input else None,
             set_hdmi_input_delay=self.cfg.set_hdmi_input_delay,
         )
+        self.power_state = state.value
         await self.settle()
         return state.value
 
@@ -195,6 +200,8 @@ class DeviceSession:
             standby_mode=self.cfg.standby_mode,
             force=force,
         )
+        if done:
+            self.power_state = "Active Standby"
         await self.disconnect()
         return "off" if done else "refused-wrong-input"
 
@@ -209,6 +216,8 @@ class DeviceSession:
             source_hdmi_input=self.cfg.source_hdmi_input,
             check_hdmi_input=self.cfg.check_hdmi_input_when_powering_off,
         )
+        if done:
+            self.power_state = "Screen Off"
         await self.settle()
         return "blanked" if done else "refused-wrong-input"
 
@@ -218,6 +227,7 @@ class DeviceSession:
             return "dry-run"
         await self.connect(wake=True)
         await power.unblank_screen(self.client)
+        self.power_state = "Active"
         await self.settle()
         return "on"
 

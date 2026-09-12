@@ -73,20 +73,24 @@ per invocation, trailing bare words select devices (none = all).
 | HDMI source-safety guard on power-off | ✅ |
 | Set HDMI input on power-on (with delay) | ✅ |
 | User-idle screen blank + mute, ignored keys, process list | ✅ (evdev instead of Raw Input) |
-| Fullscreen / "video wake lock" idle vetoes | MPRIS playback + logind idle inhibitors; compositor fullscreen detection planned (v0.3) |
+| Fullscreen / "video wake lock" idle vetoes | ✅ MPRIS playback + logind idle inhibitors + KWin fullscreen |
 | Full settings CLI (picture/sound/inputs/ambient/service-menu/Flex) | ✅ 74 luna settings vendored from upstream, identical names and values |
 | Virtual remote buttons | ✅ (pointer-input socket) |
+| webOS 2025/2026 pairing (blacklisted-manifest fix) | ✅ signature-free generic manifest (issue #351) |
 | Multiple TVs | ✅ |
-| Display-topology mode | planned (v0.3, DRM/EDID) |
-| Remote-stream detection (Sunshine/Steam) | hooks now (`-streaming_connect/_disconnect`); auto-detection planned (v0.3) |
+| Display-topology mode | ✅ DRM/EDID (`lgtvc setup map-display`) |
+| Remote-stream detection | ✅ Sunshine/Apollo (log) + Parsec/CRD/etc. (process watch) + `-streaming_connect/_disconnect` hooks |
+| Session lock/unlock → TV | ✅ blank/off on screen lock (`on_lock`/`on_unlock`) |
 | External scripting API | ✅ unix socket, same `SYSTEM_*` event names (was: named pipe) |
-| Settings GUI + tray | planned (v0.3, Qt) |
+| **MQTT / Home Assistant** | ✅ optional bridge with HA auto-discovery ([docs](docs/mqtt.md)) — a first-party integration upstream lacks |
+| Settings GUI + tray | ✅ PySide6 tray + settings dialog (`[tray]` extra) |
 | Auto-updater (MSI) | not applicable — use pip/pipx; version check planned |
 | RDP detection, NIC LUID binding, locale word lists | not applicable on Linux |
 
 ## Documentation
 
 - [Install](docs/install.md) — system & user modes, ostree/SELinux notes
+- [MQTT / Home Assistant](docs/mqtt.md) — bridge + HA auto-discovery
 - [Migration](docs/migration.md) — from Windows or a hand-rolled setup
 - [External API](docs/external-api.md) — event stream + scripting
 - [Parity matrix](docs/parity.md) — vs the Windows app
