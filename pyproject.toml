@@ -44,6 +44,7 @@ Homepage = "https://github.com/moyoseph/lgtv-companion-linux"
 Repository = "https://github.com/moyoseph/lgtv-companion-linux"
 Issues = "https://github.com/moyoseph/lgtv-companion-linux/issues"
 Changelog = "https://github.com/moyoseph/lgtv-companion-linux/blob/main/CHANGELOG.md"
+Funding = "https://buymeacoffee.com/moyoseph"
 "Upstream (Windows)" = "https://github.com/JPersson77/LGTVCompanion"
 
 [tool.hatch.build.targets.wheel]

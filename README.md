@@ -118,6 +118,15 @@ config in `/etc/lgtv-companion/config.json`, and pairing keys in
 - [Parity matrix](docs/parity.md) — vs the Windows app
 - [Troubleshooting](docs/troubleshooting.md) — pairing, WoL, suspend, and more
 
+## Support
+
+This is a free, open-source project maintained in my spare time. If it saved
+you some fiddling and you'd like to say thanks, you can
+[buy me a coffee](https://buymeacoffee.com/moyoseph) ☕ — entirely optional and
+always appreciated.
+
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/moyoseph)
+
 ## License
 
 MIT. Portions of the design and the command/button tables are derived from
