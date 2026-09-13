@@ -1,0 +1,25 @@
+name: Feature request
+description: Suggest an idea or an improvement
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The problem or use case behind the request.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like to happen? Rough ideas are fine.
+  - type: input
+    id: upstream
+    attributes:
+      label: Upstream reference (optional)
+      description: "Link if this mirrors a JPersson77/LGTVCompanion issue or feature."
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else?

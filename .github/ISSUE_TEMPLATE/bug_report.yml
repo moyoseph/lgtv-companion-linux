@@ -1,0 +1,77 @@
+name: Bug report
+description: Something isn't working
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! Most TV issues come down to the exact model and
+        firmware, so please fill in the hardware details — it saves a lot of
+        back-and-forth.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+      placeholder: The TV should power off on suspend, but it stays on.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Suspend the PC (systemctl suspend)
+        2. …
+    validations:
+      required: true
+  - type: input
+    id: tv
+    attributes:
+      label: TV model
+      placeholder: "e.g. OLED42B4 / C3 / G2"
+    validations:
+      required: true
+  - type: input
+    id: firmware
+    attributes:
+      label: webOS / firmware version
+      description: "Settings → Support → TV Information (e.g. webOS 2025, 03.43.05)"
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Install mode
+      options:
+        - system (root systemd services)
+        - user (--mode user)
+        - --direct (no daemon)
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: lgtvcompanion version
+      description: "Output of `lgtvc --version` (or the pip version)"
+    validations:
+      required: true
+  - type: input
+    id: distro
+    attributes:
+      label: Distro / desktop
+      placeholder: "e.g. Bazzite (KDE Wayland), Fedora 42, Arch"
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: "`lgtvc status` output"
+      description: This is auto-formatted, no backticks needed.
+      render: json
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: "e.g. `journalctl --user -u lgtvc-agent -n 100` or `sudo journalctl -u lgtvc-daemon -n 100`"
+      render: shell

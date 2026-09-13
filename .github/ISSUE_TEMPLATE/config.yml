@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Troubleshooting guide
+    url: https://github.com/moyoseph/lgtv-companion-linux/blob/main/docs/troubleshooting.md
+    about: Pairing, Wake-on-LAN, suspend/resume, and ostree/SELinux notes — check here first.
+  - name: Upstream Windows app
+    url: https://github.com/JPersson77/LGTVCompanion
+    about: For issues specific to the original Windows application.

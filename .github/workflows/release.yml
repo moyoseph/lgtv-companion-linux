@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# No API token: PyPI trusts this workflow via OpenID Connect.
+# One-time setup on PyPI → Manage → Publishing → "Add a pending publisher":
+#   Owner: moyoseph   Repo: lgtv-companion-linux
+#   Workflow: release.yml   Environment: pypi
+permissions:
+  contents: write        # create the GitHub Release
+  id-token: write        # OIDC token for PyPI Trusted Publishing
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: pypi
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0
+      - name: Build wheel + sdist
+        run: uv build
+      - name: Check metadata
+        run: uvx twine check dist/*
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "${{ github.ref_name }}"
+          --title "${{ github.ref_name }}"
+          --notes "See [CHANGELOG.md](CHANGELOG.md) for details."
+          dist/*
