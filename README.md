@@ -1,5 +1,13 @@
 # lgtv-companion-linux
 
+[![CI](https://github.com/moyoseph/lgtv-companion-linux/actions/workflows/ci.yml/badge.svg)](https://github.com/moyoseph/lgtv-companion-linux/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/badge/tests-120%20passing-brightgreen)](https://github.com/moyoseph/lgtv-companion-linux/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/lgtvcompanion)](https://pypi.org/project/lgtvcompanion/)
+[![Python](https://img.shields.io/pypi/pyversions/lgtvcompanion)](https://pypi.org/project/lgtvcompanion/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](#license)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Buy Me a Coffee](https://img.shields.io/badge/%E2%98%95-buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/moyoseph)
+
 Make your LG (webOS) TV turn on and off with your PC. When the computer boots
 the TV wakes up; when it sleeps or shuts down the TV powers off. It also blanks
 the TV when you're idle, switches HDMI inputs, wakes the TV over the network,
