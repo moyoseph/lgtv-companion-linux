@@ -13,7 +13,7 @@ from lgtvcompanion.daemon.inputdev import EV_KEY, KEY_PRESS
 from lgtvcompanion.daemon.server import IpcServer
 from lgtvcompanion.daemon.wake import WakeOnInput
 
-from .test_session_and_ipc import short_sock
+from .harness import short_sock
 
 # -- WakeOnInput --------------------------------------------------------------
 

@@ -3,31 +3,12 @@ from __future__ import annotations
 import pytest
 
 from lgtvcompanion import config as config_mod
-from lgtvcompanion.daemon.main import Daemon
-from lgtvcompanion.ssap.handshake import KeyStore
 
-
-class FakeSession:
-    def __init__(self, id_):
-        self.cfg = type("C", (), {"id": id_, "name": id_})()
-        self.auto_enabled = True
-        self.calls = []
-
-    async def blank(self):
-        self.calls.append("blank")
-
-    async def power_off(self):
-        self.calls.append("off")
-
-    async def power_on(self):
-        self.calls.append("on")
+from .harness import FakeSession, make_daemon
 
 
 def _daemon(tmp_path, **global_kw):
-    cfg = config_mod.Config(devices=[config_mod.DeviceConfig(id="tv1", host="10.0.0.6")])
-    for k, v in global_kw.items():
-        setattr(cfg.global_, k, v)
-    d = Daemon(cfg, KeyStore(tmp_path / "keys"), str(tmp_path / "ipc.sock"))
+    d = make_daemon(tmp_path, **global_kw)
     d.sessions = [FakeSession("tv1")]
     return d
 

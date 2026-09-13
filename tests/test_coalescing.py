@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 
 
-from .test_session_and_ipc import make_session
+from .harness import make_session
 
 
 async def test_concurrent_power_on_coalesces_to_one_connect(tv, tmp_path):

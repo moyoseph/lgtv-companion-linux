@@ -94,16 +94,27 @@ def test_buttons_vendored():
 
 
 async def test_button_command_via_session(tv, tmp_path):
-    from .test_session_and_ipc import make_session
+    from .harness import make_session
     s = make_session(tv, tmp_path)
-    # fake TV has no pointer socket endpoint -> expect a clean error, not a hang
+    result = await s.execute(lookup("button"), ["HOME"])
+    assert result == {"returnValue": True, "button": "HOME"}
+    # the exact plain-text wire format landed on the pointer side-socket
+    assert tv.button_frames == ["type:button\nname:HOME\n\n"]
+    await s.disconnect()
+
+
+async def test_button_command_without_pointer_socket(tv, tmp_path):
+    from .harness import make_session
+    tv.pointer_socket_enabled = False
+    s = make_session(tv, tmp_path)
+    # TV without the endpoint -> a clean error, not a hang
     with pytest.raises((ConnectionError, OSError)):
         await s.execute(lookup("button"), ["HOME"])
     await s.disconnect()
 
 
 async def test_generated_command_through_session(tv, tmp_path):
-    from .test_session_and_ipc import make_session
+    from .harness import make_session
     s = make_session(tv, tmp_path)
     result = await s.execute(lookup("energysaving"), ["max"])
     assert result == {"returnValue": True}

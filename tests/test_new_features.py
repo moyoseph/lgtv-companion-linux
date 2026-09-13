@@ -7,11 +7,11 @@ from types import SimpleNamespace
 import pytest
 
 from lgtvcompanion import config as config_mod
-from lgtvcompanion.daemon.main import Daemon
 from lgtvcompanion.daemon.vetoes import VetoEngine
 from lgtvcompanion.ssap import wol
 from lgtvcompanion.ssap.commands import lookup
-from lgtvcompanion.ssap.handshake import KeyStore
+
+from .harness import FakeSession, make_daemon
 
 
 # --- dolbyHdrFilmMaker (#287) ------------------------------------------------
@@ -72,35 +72,7 @@ async def test_veto_mpris_any_still_vetoes_background():
 
 # --- idle action power_off + topology keep_on_boot (daemon) -------------------
 
-class FakeSession:
-    def __init__(self, id_, key=None):
-        self.cfg = SimpleNamespace(id=id_, name=id_, unique_display_key=key)
-        self.auto_enabled = True
-        self.calls = []
-
-    async def blank(self):
-        self.calls.append("blank")
-        return "blanked"
-
-    async def unblank(self):
-        self.calls.append("unblank")
-        return "on"
-
-    async def power_off(self):
-        self.calls.append("off")
-        return "off"
-
-    async def power_on(self):
-        self.calls.append("on")
-        return "Active"
-
-
-def _daemon(tmp_path, **g):
-    cfg = config_mod.Config(devices=[config_mod.DeviceConfig(id="tv1", host="h")])
-    for k, v in g.items():
-        setattr(cfg.global_, k, v)
-    return Daemon(cfg, KeyStore(tmp_path / "keys"), str(tmp_path / "s.sock"),
-                  state_dir=tmp_path)
+_daemon = make_daemon
 
 
 async def test_idle_action_power_off(tmp_path):

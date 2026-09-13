@@ -1,43 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-import tempfile
-from pathlib import Path
 
 from lgtvcompanion import ipc
-from lgtvcompanion.config import DeviceConfig
-from lgtvcompanion.daemon.devices import DeviceSession
 from lgtvcompanion.daemon.server import IpcServer
 from lgtvcompanion.ssap.commands import COMMANDS
-from lgtvcompanion.ssap.handshake import KeyStore
 
-from .fake_tv import VALID_KEY
-
-
-def short_sock() -> str:
-    # AF_UNIX paths are capped (~104 bytes on macOS); pytest tmp_path is too deep
-    return str(Path(tempfile.mkdtemp(prefix="lgtvc")) / "ipc.sock")
-
-
-def make_session(tv, tmp_path, **overrides) -> DeviceSession:
-    store = KeyStore(tmp_path / "keys")
-    store.save("tv1", VALID_KEY)
-    cfg = DeviceConfig(
-        id="tv1", host="127.0.0.1", ssl=False, source_hdmi_input=4,
-        persistent_connection="keep_open", retry_attempts=2,
-        backoff_base=0.05, backoff_max=0.1, timeout=3.0,
-        **overrides)
-    session = DeviceSession(cfg, store)
-    session.client.port = tv.port
-    orig = session._new_client
-
-    def patched():
-        c = orig()
-        c.port = tv.port
-        return c
-
-    session._new_client = patched
-    return session
+from .harness import make_session, short_sock
 
 
 async def test_session_executes_request_command(tv, tmp_path):

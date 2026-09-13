@@ -7,6 +7,8 @@ from lgtvcompanion.config import RemoteStreamConfig
 from lgtvcompanion.daemon.streams import StreamController
 from lgtvcompanion.daemon.topology import parse_edid_key
 
+from .harness import FakeSession
+
 
 # --- Sunshine log watcher ----------------------------------------------------
 
@@ -55,24 +57,6 @@ def test_find_sunshine_log_explicit(tmp_path):
 
 
 # --- StreamController --------------------------------------------------------
-
-class FakeSession:
-    def __init__(self, id_):
-        self.cfg = type("C", (), {"id": id_})()
-        self.calls = []
-
-    async def power_off(self):
-        self.calls.append("off")
-        return "off"
-
-    async def power_on(self):
-        self.calls.append("on")
-        return "Active"
-
-    async def blank(self):
-        self.calls.append("blank")
-        return "blanked"
-
 
 def stream_cfg(**kw):
     cfg = RemoteStreamConfig(enabled=True)

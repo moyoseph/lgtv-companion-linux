@@ -11,7 +11,7 @@ from lgtvcompanion.daemon.devices import DeviceSession
 from lgtvcompanion.ssap.handshake import KeyStore
 
 from .fake_tv import VALID_KEY
-from .test_session_and_ipc import make_session
+from .harness import make_session
 
 
 async def test_power_on_from_active_is_noop(tv, tmp_path):

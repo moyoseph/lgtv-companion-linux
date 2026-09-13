@@ -33,7 +33,7 @@ def ipc_request(cmd: str, args: list | None = None,
     return json.loads(buf.splitlines()[0])
 
 
-def main() -> None:
+def main() -> None:  # pragma: no cover — pure Qt wiring; ipc_request above is tested
     try:
         from PySide6.QtGui import QAction, QIcon
         from PySide6.QtWidgets import (

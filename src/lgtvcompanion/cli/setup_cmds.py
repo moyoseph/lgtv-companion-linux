@@ -6,7 +6,6 @@ import argparse
 import asyncio
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -192,16 +191,6 @@ WantedBy=graphical-session.target
 
 LEGACY_UNITS = ["lgtv-startup.service", "lgtv-shutdown.service", "lgtv-sleep.service"]
 LEGACY_USER_UNIT = "tv-wake-on-input.service"
-
-
-def _bin(name: str) -> str:
-    sibling = Path(sys.argv[0]).resolve().parent / name
-    if sibling.exists():
-        return str(sibling)
-    found = shutil.which(name)
-    if found:
-        return found
-    sys.exit(f"cannot locate {name} — is the package installed?")
 
 
 def _python_bin() -> str:
