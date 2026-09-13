@@ -52,3 +52,38 @@ jobs:
         with:
           name: dist
           path: dist/*
+
+  badges:
+    # Recompute the tests + coverage badges and publish them to the `badges`
+    # branch (read by the README shields). Only on green pushes to main.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0
+      - name: Install
+        run: |
+          uv venv
+          uv pip install -e '.[dev]'
+      - name: Compute coverage + test count
+        run: |
+          uv run pytest -q --cov=lgtvcompanion --cov-report=json:coverage.json
+          n=$(uv run pytest --collect-only -q | grep -cE '::')
+          uv run python scripts/gen_badges.py coverage.json "$n" badges-out
+      - name: Publish to badges branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          tmp="$(mktemp -d)"
+          cp badges-out/coverage.json badges-out/tests.json "$tmp/"
+          cd "$tmp"
+          git init -q
+          git checkout -q -b badges
+          git add coverage.json tests.json
+          git commit -q -m "chore: update badges [skip ci]"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" badges

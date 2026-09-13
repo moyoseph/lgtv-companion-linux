@@ -1,7 +1,8 @@
 # lgtv-companion-linux
 
 [![CI](https://github.com/moyoseph/lgtv-companion-linux/actions/workflows/ci.yml/badge.svg)](https://github.com/moyoseph/lgtv-companion-linux/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-120%20passing-brightgreen)](https://github.com/moyoseph/lgtv-companion-linux/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/moyoseph/lgtv-companion-linux/badges/tests.json)](https://github.com/moyoseph/lgtv-companion-linux/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/moyoseph/lgtv-companion-linux/badges/coverage.json)](https://github.com/moyoseph/lgtv-companion-linux/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/lgtvcompanion)](https://pypi.org/project/lgtvcompanion/)
 [![Python](https://img.shields.io/pypi/pyversions/lgtvcompanion)](https://pypi.org/project/lgtvcompanion/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](#license)

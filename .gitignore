@@ -8,3 +8,5 @@ dist/
 .ruff_cache/
 .idea/
 uv.lock
+.coverage
+coverage.json
