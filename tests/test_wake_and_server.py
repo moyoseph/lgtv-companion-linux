@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 
 from lgtvcompanion import ipc
 from lgtvcompanion.daemon.inputdev import EV_KEY, KEY_PRESS
@@ -57,6 +58,9 @@ async def test_cooldown_suppresses_second_press():
         pass
 
     w = WakeOnInput(is_tv_reachable=unreachable, wake=wake, cooldown_s=100.0)
+    # Prime the last-attempt clock so the first press is allowed regardless of
+    # the machine's uptime (monotonic() can be < cooldown on a fresh CI runner).
+    w._last_attempt = time.monotonic() - 200.0
     w.notify_input()
     w.notify_input()   # within cooldown → dropped
     await asyncio.sleep(0.05)
