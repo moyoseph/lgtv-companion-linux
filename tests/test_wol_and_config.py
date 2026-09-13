@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import socket
+import sys
 
 import pytest
 
@@ -105,3 +106,130 @@ def test_import_legacy_minimal_tree(tmp_path):
     assert key is None
     assert cfg.devices[0].host == "10.0.0.9"
     assert cfg.devices[0].source_hdmi_input == 4  # proven default
+
+
+# -- wol: portable edge branches --------------------------------------------------
+
+
+def test_magic_packet_rejects_wrong_length():
+    with pytest.raises(ValueError, match="bad MAC"):
+        magic_packet("00:11:22:33:44")        # 5 octets
+
+
+def test_send_wol_bad_target_is_swallowed(caplog):
+    import logging
+    with caplog.at_level(logging.WARNING, logger="lgtvcompanion.ssap.wol"):
+        # unparseable address -> gaierror (an OSError) at sendto, warned not raised
+        send_wol(["00:11:22:33:44:55"], "127.0.0.1", method="directed",
+                 extra_targets=["999.999.999.999"])
+    assert "WoL send" in caplog.text
+
+
+def test_send_wol_bind_failure_is_swallowed(monkeypatch, caplog):
+    import logging
+    from lgtvcompanion.ssap import wol as wol_mod
+    # an IP this machine does not own -> bind() fails, warned not raised
+    monkeypatch.setattr(wol_mod, "interface_ip", lambda name: "203.0.113.7")
+    with caplog.at_level(logging.WARNING, logger="lgtvcompanion.ssap.wol"):
+        send_wol(["00:11:22:33:44:55"], "127.0.0.1", method="directed",
+                 interface="eth0")
+    assert "could not bind" in caplog.text
+
+
+async def test_wol_burst_resends_until_stop(monkeypatch):
+    import asyncio
+    from lgtvcompanion.ssap import wol as wol_mod
+    calls: list = []
+    monkeypatch.setattr(wol_mod, "send_wol", lambda *a, **k: calls.append(1))
+    stop = asyncio.Event()
+
+    async def setter():
+        await asyncio.sleep(0.05)
+        stop.set()
+
+    task = asyncio.create_task(setter())
+    await asyncio.wait_for(
+        wol_mod.wol_burst(["00:11:22:33:44:55"], "127.0.0.1",
+                          stop=stop, interval=0.01), timeout=2)
+    await task
+    assert len(calls) >= 2          # resent at least once before stop
+
+
+# -- wol: Linux-only real-interface paths (run on the CI badge job) ----------------
+
+
+linux_only = pytest.mark.skipif(
+    not sys.platform.startswith("linux"), reason="Linux SIOCGIF* ioctls")
+
+
+@linux_only
+def test_subnet_broadcast_of_loopback():
+    from lgtvcompanion.ssap.wol import subnet_broadcast
+    assert subnet_broadcast("127.0.0.1") == "127.255.255.255"
+
+
+@linux_only
+def test_interface_ip_of_loopback():
+    from lgtvcompanion.ssap.wol import interface_ip
+    assert interface_ip("lo") == "127.0.0.1"
+
+
+# -- config: remaining validate/import branches ------------------------------------
+
+
+def test_user_state_path_honours_xdg(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
+    assert config_mod.user_state_path() == tmp_path / "lgtv-companion"
+
+
+def test_device_selector_miss_returns_none():
+    cfg = config_mod.Config(devices=[config_mod.DeviceConfig(id="tv1", host="h")])
+    assert cfg.device("nope") is None
+
+
+def test_validate_device_field_ranges():
+    cfg = config_mod.Config(devices=[config_mod.DeviceConfig(
+        id="tv1", host="", source_hdmi_input=9, set_hdmi_input_delay=99)])
+    joined = " ".join(config_mod.validate(cfg))
+    assert "missing host" in joined
+    assert "source_hdmi_input" in joined
+    assert "set_hdmi_input_delay" in joined
+
+
+def test_find_config_prefers_system(monkeypatch, tmp_path):
+    sysconf = tmp_path / "sys.json"
+    config_mod.save(config_mod.Config(
+        devices=[config_mod.DeviceConfig(id="tv1", host="h")]), sysconf)
+    monkeypatch.setattr(config_mod, "SYSTEM_CONFIG", sysconf)
+    assert config_mod.find_config() == sysconf
+
+
+def test_import_legacy_backoff_and_bad_values(tmp_path, caplog):
+    import logging
+    legacy = tmp_path / "lgtvcontrol"
+    legacy.mkdir()
+    (legacy / "tv_ip").write_text("192.0.2.5\n")
+    (legacy / "config").write_text("backoff_base = 1.5\ntimeout = zebra\n")
+    with caplog.at_level(logging.WARNING, logger="lgtvcompanion.config"):
+        cfg, _ = config_mod.import_legacy(legacy)
+    assert cfg.devices[0].backoff_base == 1.5
+    assert cfg.devices[0].timeout == 10.0      # bad value ignored, default kept
+    assert "bad value" in caplog.text
+
+
+def test_import_windows_remaining_prefs(tmp_path):
+    import json as json_mod
+    data = {
+        "LGTV Companion": {
+            "BlankWhenIdleFullscreenDisable": True,
+            "KeepTopologyOnBoot": True,
+            "BlankWhenIdleProcessList": {"Empty": {"Binary": "", "Running": True}},
+        },
+        "Device1": {"IP": "192.0.2.9"},
+    }
+    src = tmp_path / "win.json"
+    src.write_text(json_mod.dumps(data))
+    cfg, _ = config_mod.import_windows(src)
+    assert cfg.global_.idle.veto_fullscreen is True
+    assert cfg.global_.topology.keep_on_boot is True
+    assert cfg.global_.idle.process_list == []   # empty Binary skipped

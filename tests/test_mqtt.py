@@ -1,10 +1,21 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
+import sys
+from types import SimpleNamespace
+
+import pytest
 
 from lgtvcompanion.config import MqttConfig
+from lgtvcompanion.daemon.server import IpcServer
+from lgtvcompanion.mqtt import bridge as bridge_mod
 from lgtvcompanion.mqtt import discovery as disc
+from lgtvcompanion.mqtt import main as mqtt_main
 from lgtvcompanion.mqtt.bridge import Bridge, state_topics_for
+
+from .harness import short_sock
 
 
 # --- pure command parsing ----------------------------------------------------
@@ -123,3 +134,193 @@ def test_mqtt_config_roundtrip(tmp_path):
     loaded = config_mod.load(p)
     assert loaded.global_.mqtt.enabled is True
     assert loaded.global_.mqtt.host == "192.168.1.5"
+
+
+# --- Bridge.run() end-to-end (fake broker, real IPC server) -------------------
+
+class FakeAiomqttClient:
+    """Async-context-manager stand-in for aiomqtt.Client: records publishes and
+    subscribes; .messages yields one command then blocks until cancelled."""
+
+    def __init__(self, **kwargs):
+        self.kwargs = kwargs
+        self.published: list[tuple[str, object, bool]] = []
+        self.subscribed: list[str] = []
+        self._blocked = asyncio.Event()  # never set; run_task cancel unblocks
+        self.messages = self._message_gen()
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def publish(self, topic, payload, qos=0, retain=False):
+        self.published.append((topic, payload, retain))
+
+    async def subscribe(self, topic):
+        self.subscribed.append(topic)
+
+    async def _message_gen(self):
+        # bridge does str(message.topic), so a plain str topic matches
+        yield SimpleNamespace(topic="lgtvc/tv1/set/power", payload=b"OFF")
+        await self._blocked.wait()
+
+
+async def test_bridge_run_end_to_end(monkeypatch):
+    import aiomqtt
+
+    clients: list[FakeAiomqttClient] = []
+
+    def factory(**kwargs):
+        c = FakeAiomqttClient(**kwargs)
+        clients.append(c)
+        return c
+
+    monkeypatch.setattr(aiomqtt, "Client", factory)
+
+    calls: list[tuple] = []
+
+    async def dispatcher(cmd, args, devices):
+        calls.append((cmd, args, devices))
+        if cmd == "status":
+            return {"idle_active": False,
+                    "devices": {"tv1": {"name": "TV", "power_state": "Active",
+                                        "source_hdmi_input": 4}}}
+        return {}
+
+    sock = short_sock()
+    server = IpcServer(sock, dispatcher)
+    await server.start()
+    b = Bridge(MqttConfig(topic_prefix="lgtvc"), sock)
+    run_task = asyncio.create_task(b.run())
+    try:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 5.0
+        while ("poweroff", [], ["tv1"]) not in calls:
+            assert loop.time() < deadline, f"command never reached daemon: {calls}"
+            await asyncio.sleep(0.01)
+
+        client = clients[0]
+        assert client.kwargs["hostname"] == "localhost"
+        assert client.kwargs["will"].topic == "lgtvc/bridge/availability"
+        assert ("lgtvc/bridge/availability", b"online", True) in client.published
+        assert client.subscribed == ["lgtvc/+/set/#"]
+        topics = [t for t, _p, _r in client.published]
+        assert "homeassistant/switch/lgtvc_tv1_power/config" in topics
+        assert ("lgtvc/tv1/availability", b"online", True) in client.published
+    finally:
+        run_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.wait_for(run_task, timeout=2.0)
+        await server.stop()
+
+
+# --- _announce / _poll_loop / _status / _handle_command edge cases ------------
+
+async def test_announce_publishes_discovery_and_availability():
+    b = Bridge(MqttConfig(topic_prefix="lgtvc"), "/tmp/x.sock")
+    mqtt = FakeMqtt()
+    ipc = FakeIpc({"devices": {"tv1": {"name": "Living Room",
+                                       "power_state": "Active"}}})
+    await b._announce(mqtt, ipc)
+    published = dict(mqtt.published)
+    for topic, payload in disc.discovery_configs(
+            "lgtvc", "homeassistant", "tv1", "Living Room"):
+        assert published[topic] == disc.discovery_payload_json(payload)
+    assert published["lgtvc/tv1/availability"] == "online"
+
+
+async def test_announce_disabled_publishes_nothing():
+    b = Bridge(MqttConfig(topic_prefix="lgtvc", discovery=False), "/tmp/x.sock")
+    mqtt = FakeMqtt()
+    await b._announce(mqtt, FakeIpc({}))
+    assert mqtt.published == []
+
+
+async def test_poll_loop_survives_status_failure(monkeypatch):
+    monkeypatch.setattr(bridge_mod, "POLL_INTERVAL", 0.01)
+
+    class FlakyIpc:
+        def __init__(self):
+            self.calls = 0
+
+        async def request(self, cmd, args, devices):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("ipc down")
+            return {"ok": True,
+                    "results": {"idle_active": False,
+                                "devices": {"tv1": {"power_state": "Active"}}}}
+
+    b = Bridge(MqttConfig(topic_prefix="lgtvc"), "/tmp/x.sock")
+    mqtt = FakeMqtt()
+    ipc = FlakyIpc()
+    task = asyncio.create_task(b._poll_loop(mqtt, ipc))
+    try:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 2.0
+        while ("lgtvc/tv1/power", "ON") not in mqtt.published:
+            assert loop.time() < deadline, "poll loop died after one failure"
+            await asyncio.sleep(0.01)
+        assert ipc.calls >= 2  # first attempt raised, loop kept going
+    finally:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=2.0)
+
+
+async def test_status_not_ok_returns_empty():
+    class NotOkIpc:
+        async def request(self, cmd, args, devices):
+            return {"ok": False, "error": "boom"}
+
+    b = Bridge(MqttConfig(), "/tmp/x.sock")
+    assert await b._status(NotOkIpc()) == {}
+
+
+async def test_handle_command_ipc_error_swallowed():
+    class BrokenIpc:
+        async def request(self, cmd, args, devices):
+            raise ConnectionError("daemon gone")
+
+    b = Bridge(MqttConfig(topic_prefix="lgtvc"), "/tmp/x.sock")
+    await b._handle_command(BrokenIpc(), "lgtvc/tv1/set/power", b"ON")  # no raise
+
+
+# --- mqtt/main.py entry point --------------------------------------------------
+
+def test_mqtt_main_exits_without_config(monkeypatch):
+    monkeypatch.setattr(mqtt_main.config_mod, "find_config", lambda: None)
+    with pytest.raises(SystemExit, match="no config found"):
+        mqtt_main.main()
+
+
+def test_mqtt_main_exits_when_disabled(monkeypatch, tmp_path):
+    from lgtvcompanion import config as config_mod
+    cfg = config_mod.Config(devices=[config_mod.DeviceConfig(id="tv1", host="h")])
+    p = tmp_path / "config.json"
+    config_mod.save(cfg, p)  # mqtt.enabled defaults to False
+    monkeypatch.setattr(config_mod, "find_config", lambda: p)
+    with pytest.raises(SystemExit, match="mqtt.enabled is false"):
+        mqtt_main.main()
+
+
+def test_mqtt_main_socket_override_reaches_run(monkeypatch, tmp_path):
+    from lgtvcompanion import config as config_mod
+    cfg = config_mod.Config(devices=[config_mod.DeviceConfig(id="tv1", host="h")])
+    cfg.global_.mqtt.enabled = True
+    p = tmp_path / "config.json"
+    config_mod.save(cfg, p)
+    monkeypatch.setattr(config_mod, "find_config", lambda: p)
+    monkeypatch.setattr(sys, "argv", ["lgtvc-mqtt", "--socket", "/tmp/x"])
+    recorded = {}
+
+    async def fake_run(mqtt_cfg, socket_path):
+        recorded["cfg"] = mqtt_cfg
+        recorded["socket"] = socket_path
+
+    monkeypatch.setattr(mqtt_main, "_run", fake_run)
+    mqtt_main.main()  # real asyncio.run drives the faked _run
+    assert recorded["socket"] == "/tmp/x"
+    assert recorded["cfg"].enabled is True

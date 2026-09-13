@@ -1,15 +1,23 @@
-"""Unit tests for `lgtvc setup` — systemd unit rendering and the simpler
-subcommands, all mocked so nothing touches the real system."""
+"""Unit tests for `lgtvc setup` — systemd unit rendering and the subcommands,
+mocked so nothing touches the real system. cmd_pair runs a REAL pairing
+conversation against a FakeTv served from a helper thread (cmd_pair calls
+asyncio.run itself, so the test stays sync)."""
 
 from __future__ import annotations
 
+import asyncio
+import json
 import subprocess
+import sys
+import threading
 from types import SimpleNamespace
 
 import pytest
 
 from lgtvcompanion import config as config_mod
 from lgtvcompanion.cli import setup_cmds
+
+from .fake_tv import VALID_KEY, FakeTv
 
 
 def _system_install_env(tmp_path, monkeypatch, *, mqtt=False, tray=False):
@@ -134,3 +142,298 @@ def test_setup_main_dispatches(monkeypatch):
     monkeypatch.setattr(config_mod, "find_config", lambda: None)
     # `setup show` with no config returns 1 through the argparse dispatcher
     assert setup_cmds.main(["show"]) == 1
+
+
+# -- cmd_pair against a real FakeTv -------------------------------------------
+
+
+class _ThreadTv:
+    """FakeTv served from a dedicated thread+loop, for sync commands that call
+    asyncio.run themselves (cmd_pair)."""
+
+    def __enter__(self):
+        self.tv = FakeTv()
+        self.loop = asyncio.new_event_loop()
+        started = threading.Event()
+
+        def runner():
+            asyncio.set_event_loop(self.loop)
+            self.loop.run_until_complete(self.tv.start())
+            started.set()
+            self.loop.run_forever()
+
+        self.thread = threading.Thread(target=runner, daemon=True)
+        self.thread.start()
+        assert started.wait(5), "fake TV thread failed to start"
+        return self.tv
+
+    def __exit__(self, *exc):
+        asyncio.run_coroutine_threadsafe(self.tv.stop(), self.loop).result(5)
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        self.thread.join(5)
+        return False
+
+
+def _patch_pair_env(monkeypatch, tmp_path, tv):
+    """Route cmd_pair's SsapClient at the fake TV and its keystore at tmp."""
+    import lgtvcompanion.ssap.client as client_mod
+
+    real = client_mod.SsapClient
+
+    class PatchedClient(real):
+        def __init__(self, host, **kw):
+            kw["use_ssl"] = False
+            kw["port"] = tv.port
+            super().__init__(host, **kw)
+
+    monkeypatch.setattr(client_mod, "SsapClient", PatchedClient)
+    monkeypatch.setattr(setup_cmds.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(config_mod, "user_state_path", lambda: tmp_path / "state")
+
+
+def test_cmd_pair_with_host_pairs_and_enables_wol(monkeypatch, tmp_path, capsys):
+    with _ThreadTv() as tv:
+        _patch_pair_env(monkeypatch, tmp_path, tv)
+        rc = setup_cmds.cmd_pair(SimpleNamespace(host="127.0.0.1", device="tv1"))
+    assert rc == 0
+    # the real pairing flow ran: prompt printed, key persisted
+    assert "Approve the connection" in capsys.readouterr().out
+    key_file = tmp_path / "state" / "keys" / "tv1.key"
+    assert key_file.read_text().strip() == VALID_KEY
+    # and the TV's WoL setting was enabled via the luna alert trick
+    assert any("wolwowlOnOff" in json.dumps(alert) for alert in tv.luna_calls)
+
+
+def test_cmd_pair_uses_configured_device(monkeypatch, tmp_path):
+    cfg = config_mod.Config(devices=[config_mod.DeviceConfig(
+        id="livingroom", host="127.0.0.1", ssl=False)])
+    cfg_path = tmp_path / "config.json"
+    config_mod.save(cfg, cfg_path)
+    monkeypatch.setattr(config_mod, "find_config", lambda: cfg_path)
+    with _ThreadTv() as tv:
+        _patch_pair_env(monkeypatch, tmp_path, tv)
+        # unknown --device falls back to the first configured device
+        rc = setup_cmds.cmd_pair(SimpleNamespace(host=None, device="nope"))
+    assert rc == 0
+    assert (tmp_path / "state" / "keys" / "livingroom.key").exists()
+
+
+def test_cmd_pair_no_config_exits(monkeypatch):
+    monkeypatch.setattr(config_mod, "find_config", lambda: None)
+    with pytest.raises(SystemExit):
+        setup_cmds.cmd_pair(SimpleNamespace(host=None, device="tv1"))
+
+
+def test_cmd_pair_no_devices_exits(monkeypatch, tmp_path):
+    cfg_path = tmp_path / "config.json"
+    config_mod.save(config_mod.Config(devices=[]), cfg_path)
+    monkeypatch.setattr(config_mod, "find_config", lambda: cfg_path)
+    with pytest.raises(SystemExit):
+        setup_cmds.cmd_pair(SimpleNamespace(host=None, device="tv1"))
+
+
+# -- cmd_import_windows --------------------------------------------------------
+
+
+def test_cmd_import_windows_end_to_end(monkeypatch, tmp_path):
+    from .test_import_windows import WINDOWS_CONFIG
+
+    src = tmp_path / "win.json"
+    src.write_text(json.dumps(WINDOWS_CONFIG))
+    target = tmp_path / "cfg" / "config.json"
+    monkeypatch.setattr(setup_cmds.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(config_mod, "user_config_path", lambda: target)
+    monkeypatch.setattr(config_mod, "user_state_path", lambda: tmp_path / "state")
+
+    rc = setup_cmds.cmd_import_windows(SimpleNamespace(file=str(src)))
+    assert rc == 0
+    loaded = config_mod.load(target)
+    assert loaded.device("device1").host == "192.168.1.42"
+    key_file = tmp_path / "state" / "keys" / "device1.key"
+    assert key_file.read_text().strip() == "abc123sessionkey"
+
+
+def test_cmd_import_windows_no_keys(monkeypatch, tmp_path, capsys):
+    from .test_import_windows import WINDOWS_CONFIG
+
+    data = json.loads(json.dumps(WINDOWS_CONFIG))
+    del data["Device1"]["SessionKey"]
+    src = tmp_path / "win.json"
+    src.write_text(json.dumps(data))
+    monkeypatch.setattr(setup_cmds.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(config_mod, "user_config_path",
+                        lambda: tmp_path / "cfg" / "config.json")
+    monkeypatch.setattr(config_mod, "user_state_path", lambda: tmp_path / "state")
+    assert setup_cmds.cmd_import_windows(SimpleNamespace(file=str(src))) == 0
+    assert "no session keys" in capsys.readouterr().out
+
+
+def test_cmd_import_windows_missing_file(tmp_path):
+    with pytest.raises(SystemExit):
+        setup_cmds.cmd_import_windows(SimpleNamespace(file=str(tmp_path / "no.json")))
+
+
+# -- cmd_migrate_legacy / cmd_rollback_legacy ----------------------------------
+
+
+def _migrate_env(monkeypatch, tmp_path, *, dry_run=True):
+    sysconf = tmp_path / "etc" / "config.json"
+    cfg = config_mod.Config(devices=[config_mod.DeviceConfig(id="tv1", host="h")])
+    cfg.global_.dry_run = dry_run
+    config_mod.save(cfg, sysconf)
+    monkeypatch.setattr(config_mod, "SYSTEM_CONFIG", sysconf)
+    monkeypatch.setattr(setup_cmds.os, "geteuid", lambda: 0)
+    ran: list = []
+    monkeypatch.setattr(setup_cmds, "_run", lambda cmd, check=True: ran.append(cmd))
+    return sysconf, ran
+
+
+def test_migrate_legacy_flips_dry_run_and_swaps_units(monkeypatch, tmp_path):
+    sysconf, ran = _migrate_env(monkeypatch, tmp_path)
+    rc = setup_cmds.cmd_migrate_legacy(
+        SimpleNamespace(legacy_user="bob", keep_dry_run=False))
+    assert rc == 0
+    assert config_mod.load(sysconf).global_.dry_run is False
+    joined = [" ".join(c) for c in ran]
+    assert any("disable" in c and "lgtv-startup.service" in c for c in joined)
+    assert any("--machine" in c and "bob@.host" in c for c in joined)
+    assert any(c.startswith("systemctl enable") for c in joined)
+    assert any("restart" in c and setup_cmds.DAEMON_UNIT in c for c in joined)
+
+
+def test_migrate_legacy_keep_dry_run(monkeypatch, tmp_path):
+    sysconf, _ = _migrate_env(monkeypatch, tmp_path)
+    rc = setup_cmds.cmd_migrate_legacy(
+        SimpleNamespace(legacy_user=None, keep_dry_run=True))
+    assert rc == 0
+    assert config_mod.load(sysconf).global_.dry_run is True
+
+
+def test_migrate_legacy_needs_root(monkeypatch):
+    monkeypatch.setattr(setup_cmds.os, "geteuid", lambda: 1000)
+    with pytest.raises(SystemExit):
+        setup_cmds.cmd_migrate_legacy(SimpleNamespace(legacy_user=None,
+                                                      keep_dry_run=False))
+
+
+def test_rollback_legacy_reenables_legacy_units(monkeypatch, tmp_path):
+    _, ran = _migrate_env(monkeypatch, tmp_path)
+    rc = setup_cmds.cmd_rollback_legacy(SimpleNamespace(legacy_user="bob"))
+    assert rc == 0
+    joined = [" ".join(c) for c in ran]
+    assert any("disable" in c and setup_cmds.DAEMON_UNIT in c for c in joined)
+    assert any("enable" in c and "lgtv-startup.service" in c for c in joined)
+    assert any("--machine" in c for c in joined)
+
+
+def test_rollback_legacy_needs_root(monkeypatch):
+    monkeypatch.setattr(setup_cmds.os, "geteuid", lambda: 1000)
+    with pytest.raises(SystemExit):
+        setup_cmds.cmd_rollback_legacy(SimpleNamespace(legacy_user=None))
+
+
+# -- cmd_map_display --device paths --------------------------------------------
+
+
+def _display_env(monkeypatch, tmp_path, displays):
+    import lgtvcompanion.daemon.topology as topo
+    monkeypatch.setattr(topo, "connected_displays", lambda: dict(displays))
+    cfg_path = tmp_path / "config.json"
+    config_mod.save(config_mod.Config(
+        devices=[config_mod.DeviceConfig(id="tv1", host="h")]), cfg_path)
+    monkeypatch.setattr(config_mod, "find_config", lambda: cfg_path)
+    return cfg_path
+
+
+def test_map_display_autopicks_single_lg(monkeypatch, tmp_path):
+    cfg_path = _display_env(monkeypatch, tmp_path,
+                            {"card0-HDMI-A-1": "GSM-abcd-1", "DP-1": "DEL-1"})
+    rc = setup_cmds.cmd_map_display(SimpleNamespace(device="tv1", key=None))
+    assert rc == 0
+    assert config_mod.load(cfg_path).devices[0].unique_display_key == "GSM-abcd-1"
+
+
+def test_map_display_ambiguous_lg_needs_key(monkeypatch, tmp_path):
+    _display_env(monkeypatch, tmp_path,
+                 {"HDMI-A-1": "GSM-1", "HDMI-A-2": "GSM-2"})
+    assert setup_cmds.cmd_map_display(
+        SimpleNamespace(device="tv1", key=None)) == 1
+
+
+def test_map_display_no_lg_needs_key(monkeypatch, tmp_path):
+    _display_env(monkeypatch, tmp_path, {"DP-1": "DEL-1"})
+    assert setup_cmds.cmd_map_display(
+        SimpleNamespace(device="tv1", key=None)) == 1
+
+
+def test_map_display_explicit_key(monkeypatch, tmp_path):
+    cfg_path = _display_env(monkeypatch, tmp_path, {"DP-1": "DEL-1"})
+    rc = setup_cmds.cmd_map_display(SimpleNamespace(device="tv1", key="DEL-1"))
+    assert rc == 0
+    assert config_mod.load(cfg_path).devices[0].unique_display_key == "DEL-1"
+
+
+def test_map_display_unknown_device_exits(monkeypatch, tmp_path):
+    _display_env(monkeypatch, tmp_path, {"HDMI-A-1": "GSM-1"})
+    with pytest.raises(SystemExit):
+        setup_cmds.cmd_map_display(SimpleNamespace(device="bogus", key=None))
+
+
+def test_map_display_no_config_exits(monkeypatch, tmp_path):
+    import lgtvcompanion.daemon.topology as topo
+    monkeypatch.setattr(topo, "connected_displays", lambda: {"H": "GSM-1"})
+    monkeypatch.setattr(config_mod, "find_config", lambda: None)
+    with pytest.raises(SystemExit):
+        setup_cmds.cmd_map_display(SimpleNamespace(device="tv1", key=None))
+
+
+# -- cmd_import_legacy without a client key ------------------------------------
+
+
+def test_cmd_import_legacy_without_key(monkeypatch, tmp_path, capsys):
+    legacy = tmp_path / "lgtvcontrol"
+    legacy.mkdir()
+    (legacy / "tv_ip").write_text("192.0.2.5\n")
+    monkeypatch.setattr(config_mod, "SYSTEM_CONFIG", tmp_path / "etc" / "c.json")
+    monkeypatch.setattr(config_mod, "SYSTEM_STATE", tmp_path / "state")
+    assert setup_cmds.cmd_import_legacy(
+        SimpleNamespace(legacy_dir=str(legacy))) == 0
+    assert "no legacy client.key" in capsys.readouterr().out
+
+
+# -- user install with the optional extras present -----------------------------
+
+
+def test_user_install_renders_tray_and_mqtt_units(monkeypatch, tmp_path):
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setattr(setup_cmds.Path, "home", classmethod(lambda cls: home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+    monkeypatch.setattr(setup_cmds.os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(setup_cmds, "_python_bin", lambda: "/venv/bin/python3")
+    monkeypatch.setattr(setup_cmds, "_tray_available", lambda p: True)
+    monkeypatch.setattr(setup_cmds, "_module_available", lambda p, m: True)
+    monkeypatch.setattr(setup_cmds, "_run", lambda cmd, check=True: None)
+
+    rc = setup_cmds.cmd_install(SimpleNamespace(mode="user", service_user="me"))
+    assert rc == 0
+    unit_dir = home / ".config" / "systemd" / "user"
+    assert (unit_dir / setup_cmds.TRAY_UNIT).exists()
+    assert (unit_dir / setup_cmds.MQTT_UNIT).exists()
+
+
+# -- real helper paths ----------------------------------------------------------
+
+
+def test_python_bin_is_current_interpreter():
+    assert setup_cmds._python_bin() == sys.executable
+
+
+def test_module_available_real_subprocess():
+    assert setup_cmds._module_available(sys.executable, "json") is True
+    assert setup_cmds._module_available(sys.executable, "not_a_module_xyz") is False
+
+
+def test_run_prints_and_executes(capsys):
+    setup_cmds._run([sys.executable, "-c", "pass"])
+    assert capsys.readouterr().out.startswith(f"+ {sys.executable}")

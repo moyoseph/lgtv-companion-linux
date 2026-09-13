@@ -75,3 +75,52 @@ async def test_blank_guarded_by_hdmi_input(tv, client):
     tv.foreground_app = "com.webos.app.hdmi4"
     assert await power.blank_screen(client, source_hdmi_input=4) is True
     assert tv.power_state == "Screen Off"
+
+
+# -- edge branches --------------------------------------------------------------
+
+
+async def test_unrecognized_power_state_is_unknown(tv, client):
+    tv.power_state = "Garbage"
+    assert await power.get_power_state(client) == PowerState.UNKNOWN
+
+
+async def test_foreground_app_error_returns_none(tv, client):
+    tv.error_uris[power.URI_FOREGROUND_APP] = {"errorCode": "500"}
+    assert await power.get_foreground_app(client) is None
+
+
+async def test_hdmi_guard_without_configured_input_allows(tv, client):
+    assert await power.check_hdmi_guard(client, None) is True
+
+
+async def test_hdmi_guard_unknown_foreground_allows(tv, client):
+    tv.error_uris[power.URI_FOREGROUND_APP] = {"errorCode": "500"}
+    assert await power.check_hdmi_guard(client, 4) is True
+
+
+async def test_power_on_unknown_state_tries_unblank(tv, client):
+    tv.power_state = "Garbage"
+    state = await power.power_on(client)
+    assert state == PowerState.UNKNOWN
+    uris = [u for u, _ in tv.requests]
+    assert power.URI_TURN_ON_SCREEN in uris
+
+
+async def test_power_on_sets_hdmi_input_after_delay(tv, client):
+    tv.power_state = "Active"
+    await power.power_on(client, set_hdmi_input=2, set_hdmi_input_delay=0.01)
+    assert tv.foreground_app == "com.webos.app.hdmi2"
+
+
+async def test_blank_screen_noop_when_not_active(tv, client):
+    tv.power_state = "Screen Off"
+    assert await power.blank_screen(client) is True
+    uris = [u for u, _ in tv.requests]
+    assert power.URI_TURN_OFF_SCREEN not in uris
+
+
+async def test_unblank_screen_turns_panel_on(tv, client):
+    tv.power_state = "Screen Off"
+    await power.unblank_screen(client)
+    assert tv.power_state == "Active"

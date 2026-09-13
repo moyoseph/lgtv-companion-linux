@@ -148,3 +148,142 @@ def test_edid_key_numeric_serial_fallback():
 def test_edid_rejects_garbage():
     assert parse_edid_key(b"\x00" * 128) is None
     assert parse_edid_key(b"short") is None
+
+
+# --- connected_displays / TopologyWatcher loop ---------------------------------
+
+def test_connected_displays_skips_missing_edid(tmp_path, monkeypatch):
+    from lgtvcompanion.daemon import topology
+    drm = tmp_path / "drm"
+    with_edid = drm / "card0-HDMI-A-1"
+    with_edid.mkdir(parents=True)
+    (with_edid / "status").write_text("connected\n")
+    (with_edid / "edid").write_bytes(make_edid())
+    no_edid = drm / "card0-HDMI-A-2"          # connected but EDID unreadable
+    no_edid.mkdir(parents=True)
+    (no_edid / "status").write_text("connected\n")
+    monkeypatch.setattr(topology, "DRM_PATH", drm)
+    assert topology.connected_displays() == {
+        "card0-HDMI-A-1": "GSM-5b09-302MAXXXXX99"}
+
+
+async def test_topology_watcher_detects_changes(monkeypatch):
+    import asyncio
+    from lgtvcompanion.daemon import topology
+    seen: list = []
+    state = {"keys": {"a": "K1"}}
+    monkeypatch.setattr(topology, "POLL_INTERVAL", 0.02)
+    monkeypatch.setattr(topology, "connected_displays", lambda: dict(state["keys"]))
+
+    async def on_change(keys):
+        seen.append(keys)
+
+    w = topology.TopologyWatcher(on_change)
+    w.start()
+    try:
+        await asyncio.sleep(0.06)             # baseline poll
+        state["keys"] = {"a": "K1", "b": "K2"}
+        for _ in range(200):
+            if seen:
+                break
+            await asyncio.sleep(0.01)
+    finally:
+        w.stop()
+    assert seen and seen[0] == {"K1", "K2"}
+
+
+async def test_topology_watcher_survives_handler_exception(monkeypatch):
+    import asyncio
+    from lgtvcompanion.daemon import topology
+    state = {"keys": {"a": "K1"}}
+    monkeypatch.setattr(topology, "POLL_INTERVAL", 0.02)
+    monkeypatch.setattr(topology, "connected_displays", lambda: dict(state["keys"]))
+
+    async def bad_handler(keys):
+        raise RuntimeError("handler exploded")
+
+    w = topology.TopologyWatcher(bad_handler)
+    w.start()
+    try:
+        await asyncio.sleep(0.06)
+        state["keys"] = {}
+        await asyncio.sleep(0.08)             # change fires the raising handler
+        assert not w._task.done()             # loop swallowed it and lives on
+    finally:
+        w.stop()
+
+
+# --- SunshineWatcher live loop + /proc scanning ---------------------------------
+
+async def test_sunshine_watcher_live_loop(tmp_path, monkeypatch):
+    import asyncio
+    from lgtvcompanion.agent import streams
+    monkeypatch.setattr(streams, "POLL_INTERVAL", 0.02)
+    log = tmp_path / "sunshine.log"
+    log.write_text("startup\n")
+    events: list = []
+    w = SunshineWatcher(log, events.append)
+    w.start()
+    try:
+        with open(log, "a") as f:
+            f.write("CLIENT CONNECTED\n")
+        for _ in range(200):
+            if events:
+                break
+            await asyncio.sleep(0.01)
+    finally:
+        w.stop()
+    assert events == [True]
+
+
+async def test_sunshine_watcher_start_with_missing_file(tmp_path):
+    w = SunshineWatcher(tmp_path / "absent.log", lambda s: None)
+    w.start()          # OSError -> position resets to 0, no raise
+    try:
+        assert w._pos == 0
+        assert w._read_new() == ""            # still missing -> empty
+    finally:
+        w.stop()
+
+
+def test_running_process_names_parses_comm_and_cmdline(tmp_path, monkeypatch):
+    from lgtvcompanion.agent import streams
+    proc = tmp_path / "proc"
+    p1 = proc / "123"
+    p1.mkdir(parents=True)
+    # kernel truncates comm at 15 chars; cmdline holds the full path
+    (p1 / "comm").write_text("chrome-remote-d\n")
+    (p1 / "cmdline").write_bytes(
+        b"/opt/google/chrome-remote-desktop/chrome-remote-desktop\x00--args\x00")
+    p2 = proc / "456"
+    p2.mkdir()
+    (p2 / "comm").write_text("bash\n")        # no cmdline -> OSError, skipped
+    real_path = streams.Path
+
+    class PathShim:
+        def __call__(self, p):
+            return proc if p == "/proc" else real_path(p)
+
+    monkeypatch.setattr(streams, "Path", PathShim())
+    names = streams._running_process_names()
+    assert "chrome-remote-desktop" in names   # from cmdline argv0 basename
+    assert "chrome-remote-d" in names         # from truncated comm
+    assert "bash" in names
+
+
+async def test_process_stream_watcher_live_loop(monkeypatch):
+    import asyncio
+    from lgtvcompanion.agent import streams
+    monkeypatch.setattr(streams, "POLL_INTERVAL", 0.02)
+    monkeypatch.setattr(streams, "_running_process_names", lambda: {"parsecd"})
+    events: list = []
+    w = streams.ProcessStreamWatcher(["parsec*"], events.append)
+    w.start()
+    try:
+        for _ in range(200):
+            if events:
+                break
+            await asyncio.sleep(0.01)
+    finally:
+        w.stop()
+    assert events == [True]
