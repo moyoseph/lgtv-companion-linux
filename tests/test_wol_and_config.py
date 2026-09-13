@@ -10,12 +10,12 @@ from lgtvcompanion.ssap.wol import magic_packet, send_wol
 
 
 def test_magic_packet_bytes():
-    pkt = magic_packet("34:19:4d:4b:cc:9e")
+    pkt = magic_packet("00:11:22:33:44:55")
     assert len(pkt) == 102
     assert pkt[:6] == b"\xff" * 6
-    assert pkt[6:12] == bytes.fromhex("34194d4bcc9e")
-    assert pkt[6:] == bytes.fromhex("34194d4bcc9e") * 16
-    assert magic_packet("34-19-4D-4B-CC-9E") == pkt
+    assert pkt[6:12] == bytes.fromhex("001122334455")
+    assert pkt[6:] == bytes.fromhex("001122334455") * 16
+    assert magic_packet("00-11-22-33-44-55") == pkt
 
 
 def test_magic_packet_rejects_garbage():
@@ -55,7 +55,7 @@ async def test_luna_send_uses_alert_injection(tv, client):
 
 def test_config_roundtrip(tmp_path):
     cfg = config_mod.Config(devices=[config_mod.DeviceConfig(
-        id="tv1", host="10.0.0.6", mac=["34:19:4d:4b:cc:9e"],
+        id="tv1", host="10.0.0.6", mac=["00:11:22:33:44:55"],
         source_hdmi_input=4)])
     path = tmp_path / "config.json"
     config_mod.save(cfg, path)
@@ -78,7 +78,7 @@ def test_import_legacy_full_tree(tmp_path):
     legacy = tmp_path / "lgtvcontrol"
     legacy.mkdir()
     (legacy / "tv_ip").write_text("10.0.0.6\n")
-    (legacy / "tv_mac").write_text("34:19:4d:4b:cc:9e\n")
+    (legacy / "tv_mac").write_text("00:11:22:33:44:55\n")
     (legacy / "client.key").write_text("legacy-key-abc\n")
     (legacy / "box_input").write_text("com.webos.app.hdmi2\n")
     (legacy / "config").write_text(
@@ -88,7 +88,7 @@ def test_import_legacy_full_tree(tmp_path):
     dev = cfg.devices[0]
     assert key == "legacy-key-abc"
     assert dev.host == "10.0.0.6"
-    assert dev.mac == ["34:19:4d:4b:cc:9e"]
+    assert dev.mac == ["00:11:22:33:44:55"]
     assert dev.source_hdmi_input == 2
     assert dev.set_hdmi_input == 2
     assert dev.timeout == 12

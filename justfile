@@ -1,43 +1,29 @@
-# Dev loop: Mac -> pepsi (Bazzite HTPC). `just key` once ends password friction.
+# Common dev tasks. Needs `just` (https://github.com/casey/just) and `uv`.
+# Run `just` to list recipes.
 
-host := "pepsi"
-remote_dir := "~/dev/lgtv-companion-linux"
-venv := "/usr/local/lib/lgtv-companion"
+# Lint + type-check + tests (what CI runs)
+check: lint typecheck test
 
-# Install the Mac's SSH key on the box (asks for the password one last time)
-key:
-    ssh-copy-id -i ~/.ssh/id_ed25519_pepsi.pub -o PubkeyAuthentication=no {{host}}
-
-# rsync the source over and reinstall into the box venv, restart the daemon.
-# NOT an editable install: SELinux blocks system services from reading
-# user_home_t, so the code must live inside the venv.
-deploy:
-    rsync -az --delete --exclude .venv --exclude .git --exclude __pycache__ \
-        ./ {{host}}:{{remote_dir}}/
-    ssh {{host}} "sudo {{venv}}/bin/pip install -q --no-deps --force-reinstall {{remote_dir}} && \
-        sudo systemctl try-restart lgtvc-daemon 2>/dev/null; true"
-
-# First-time box setup: create the venv and install with deps
-bootstrap:
-    rsync -az --delete --exclude .venv --exclude .git --exclude __pycache__ \
-        ./ {{host}}:{{remote_dir}}/
-    ssh {{host}} "sudo python3 -m venv {{venv}} && \
-        sudo {{venv}}/bin/pip install -q {{remote_dir}} && \
-        sudo ln -sf {{venv}}/bin/lgtvc {{venv}}/bin/lgtvc-daemon /usr/local/bin/"
-
-logs:
-    ssh {{host}} "journalctl -u lgtvc-daemon -f -o cat"
-
-status:
-    ssh {{host}} "systemctl status lgtvc-daemon lgtvc-shutdown --no-pager; \
-        systemctl is-enabled lgtv-startup lgtv-shutdown lgtv-sleep 2>&1"
-
-# Run any lgtvc command on the box: just tv -- -poweron
-tv *ARGS:
-    ssh {{host}} "lgtvc {{ARGS}}"
-
+# Run the test suite
 test:
-    .venv/bin/pytest -q
+    uv run pytest -q
 
-e2e:
-    ssh {{host}} "bash {{remote_dir}}/tests/e2e/basic.sh"
+# Lint with ruff
+lint:
+    uv run ruff check src tests
+
+# Type-check
+typecheck:
+    uv run mypy src
+
+# Tests with a coverage report
+cov:
+    uv run pytest -q --cov=lgtvcompanion --cov-report=term-missing
+
+# Auto-fix lint issues
+fix:
+    uv run ruff check --fix src tests
+
+# Build the wheel + sdist
+build:
+    uv build
