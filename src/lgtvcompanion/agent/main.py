@@ -108,13 +108,14 @@ class Agent:
 
     def _start_update_check(self, bus) -> None:
         path = config_mod.find_config()
-        mode = "notify"
+        mode, offline = "notify", False
         if path is not None:
             try:
-                mode = config_mod.load(path).global_.update_check
+                g = config_mod.load(path).global_
+                mode, offline = g.update_check, g.offline_mode
             except (ValueError, OSError):
                 pass
-        if mode == "off":
+        if offline or mode == "off":   # offline_mode never phones GitHub
             return
         from .update import UpdateChecker
         self._updater = UpdateChecker(bus)

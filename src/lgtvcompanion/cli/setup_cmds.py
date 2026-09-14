@@ -458,6 +458,25 @@ def cmd_show(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_offline_mode(args: argparse.Namespace) -> int:
+    """Toggle offline_mode: when on, the app makes zero internet connections
+    (no update check, no cloud MQTT broker). TV control is LAN-only regardless."""
+    cfg_path = config_mod.find_config()
+    if cfg_path is None:
+        sys.exit("no config found — run: lgtvc setup pair --host <tv-ip>")
+    cfg = config_mod.load(cfg_path)
+    if args.state is None:
+        print("on" if cfg.global_.offline_mode else "off")
+        return 0
+    cfg.global_.offline_mode = args.state == "on"
+    config_mod.save(cfg, cfg_path)
+    print(f"offline_mode = {args.state}")
+    print("Restart the affected services for it to take effect:")
+    print("  systemctl --user restart lgtvc-agent      # stops the update check")
+    print("  sudo systemctl restart lgtvc-mqtt         # if the MQTT bridge is running")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="lgtvc setup")
     sub = parser.add_subparsers(dest="action", required=True)
@@ -499,6 +518,12 @@ def main(argv: list[str]) -> int:
 
     p = sub.add_parser("show", help="print the active config")
     p.set_defaults(func=cmd_show)
+
+    p = sub.add_parser("offline-mode",
+                       help="privacy: no internet (update check off, LAN-only MQTT)")
+    p.add_argument("state", nargs="?", choices=["on", "off"],
+                   help="omit to print the current state")
+    p.set_defaults(func=cmd_offline_mode)
 
     args = parser.parse_args(argv)
     return args.func(args)

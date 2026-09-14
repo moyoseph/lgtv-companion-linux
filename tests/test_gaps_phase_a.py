@@ -480,3 +480,34 @@ async def test_mpris_get_bus_lazy_connects(monkeypatch):
     monkeypatch.setattr(mpris, "_bus", None)
     got = await mpris._get_bus()
     assert got is fake
+
+
+def test_mqtt_main_offline_refuses_cloud_broker(monkeypatch, tmp_path):
+    from lgtvcompanion import config as config_mod
+    from lgtvcompanion.mqtt import main as mqtt_main
+    cfg = config_mod.Config(devices=[config_mod.DeviceConfig(id="tv1", host="h")])
+    cfg.global_.mqtt.enabled = True
+    cfg.global_.mqtt.host = "broker.example.com"    # public
+    cfg.global_.offline_mode = True
+    path = tmp_path / "config.json"
+    config_mod.save(cfg, path)
+    monkeypatch.setattr(config_mod, "find_config", lambda: path)
+    with pytest.raises(SystemExit, match="offline_mode"):
+        mqtt_main.main()
+
+
+def test_mqtt_main_offline_allows_lan_broker(monkeypatch, tmp_path):
+    from lgtvcompanion import config as config_mod
+    from lgtvcompanion.mqtt import main as mqtt_main
+    cfg = config_mod.Config(devices=[config_mod.DeviceConfig(id="tv1", host="h")])
+    cfg.global_.mqtt.enabled = True
+    cfg.global_.mqtt.host = "10.0.0.9"              # LAN broker is fine offline
+    cfg.global_.offline_mode = True
+    path = tmp_path / "config.json"
+    config_mod.save(cfg, path)
+    monkeypatch.setattr(config_mod, "find_config", lambda: path)
+    ran = {}
+    monkeypatch.setattr(mqtt_main.asyncio, "run",
+                        lambda coro: (coro.close(), ran.setdefault("ran", True)))
+    mqtt_main.main()                                # passes the guard, reaches run
+    assert ran.get("ran") is True

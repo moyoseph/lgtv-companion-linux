@@ -37,8 +37,12 @@ def main() -> None:
     if cfg_path is None:
         sys.exit("no config found")
     cfg = config_mod.load(cfg_path)
-    if not cfg.global_.mqtt.enabled:
+    g = cfg.global_
+    if not g.mqtt.enabled:
         sys.exit("mqtt.enabled is false in the config — nothing to do")
+    if g.offline_mode and not config_mod.is_lan_host(g.mqtt.host):
+        sys.exit(f"offline_mode is on and mqtt.host {g.mqtt.host!r} isn't a "
+                 "private/LAN address — use a LAN broker or turn offline_mode off")
 
     socket_path = ipc.default_socket()
     if len(sys.argv) > 2 and sys.argv[1] == "--socket":

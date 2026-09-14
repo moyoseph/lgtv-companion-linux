@@ -233,3 +233,24 @@ def test_import_windows_remaining_prefs(tmp_path):
     assert cfg.global_.idle.veto_fullscreen is True
     assert cfg.global_.topology.keep_on_boot is True
     assert cfg.global_.idle.process_list == []   # empty Binary skipped
+
+
+# -- offline mode --------------------------------------------------------------
+
+
+def test_is_lan_host_truth_table():
+    for h in ("127.0.0.1", "10.0.0.6", "192.168.1.5", "172.16.0.1", "169.254.1.2",
+              "::1", "fd00::1", "localhost", "homeassistant.local", "broker.lan",
+              "nas.home", "x.internal"):
+        assert config_mod.is_lan_host(h) is True, h
+    for h in ("8.8.8.8", "1.1.1.1", "broker.example.com", "homeassistant",
+              "mqtt.hivemq.com"):
+        assert config_mod.is_lan_host(h) is False, h
+
+
+def test_offline_mode_round_trips(tmp_path):
+    cfg = config_mod.Config(devices=[config_mod.DeviceConfig(id="tv1", host="h")])
+    cfg.global_.offline_mode = True
+    path = tmp_path / "config.json"
+    config_mod.save(cfg, path)
+    assert config_mod.load(path).global_.offline_mode is True

@@ -185,6 +185,29 @@ untampered. (PyPI installs are separately covered by
 [PEP 740 attestations](https://docs.pypi.org/attestations/) — `pip` verifies
 those automatically.)
 
+## Offline / privacy mode
+
+Controlling the TV never needs the internet — the whole link (SSAP over
+`wss://<tv-ip>:3001` + Wake-on-LAN) is LAN-only by design. The only things this
+app can send outward are the optional **daily update check** (GitHub) and the
+**MQTT bridge** *if* you point it at a cloud broker.
+
+`offline_mode` is a master switch that guarantees the app makes **zero internet
+connections**: it disables the update check and refuses a non-LAN MQTT broker (a
+LAN Home Assistant broker still works).
+
+```sh
+lgtvc setup offline-mode on      # or: off  (no arg prints the current state)
+systemctl --user restart lgtvc-agent   # takes effect on restart
+```
+
+Or tick **"Offline mode (no internet)"** in the tray's Settings dialog.
+
+> Honest caveats: this locks down *this app*, not your **TV** — LG webOS sets
+> phone home on their own; block that at the router if you care. And the TLS to
+> the TV intentionally skips certificate verification (TVs use self-signed
+> certs; the threat model is your LAN).
+
 ## Support
 
 This is a free, open-source project maintained in my spare time. If it saved

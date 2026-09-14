@@ -442,3 +442,25 @@ def test_run_prints_and_executes(capsys):
 def test_tray_available_delegates(monkeypatch):
     monkeypatch.setattr(setup_cmds, "_module_available", lambda p, m: True)
     assert setup_cmds._tray_available("py") is True
+
+
+def test_offline_mode_subcommand_toggles(monkeypatch, tmp_path, capsys):
+    cfg_path = tmp_path / "config.json"
+    config_mod.save(config_mod.Config(
+        devices=[config_mod.DeviceConfig(id="tv1", host="h")]), cfg_path)
+    monkeypatch.setattr(config_mod, "find_config", lambda: cfg_path)
+    # default state
+    setup_cmds.cmd_offline_mode(SimpleNamespace(state=None))
+    assert capsys.readouterr().out.strip() == "off"
+    # turn on -> persisted + restart reminder
+    setup_cmds.cmd_offline_mode(SimpleNamespace(state="on"))
+    assert "restart" in capsys.readouterr().out.lower()
+    assert config_mod.load(cfg_path).global_.offline_mode is True
+    setup_cmds.cmd_offline_mode(SimpleNamespace(state=None))
+    assert capsys.readouterr().out.strip() == "on"
+
+
+def test_offline_mode_subcommand_no_config(monkeypatch):
+    monkeypatch.setattr(config_mod, "find_config", lambda: None)
+    with pytest.raises(SystemExit):
+        setup_cmds.cmd_offline_mode(SimpleNamespace(state="on"))
