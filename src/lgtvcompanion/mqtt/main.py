@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+import signal
 import sys
 
 from .. import config as config_mod
@@ -16,14 +18,20 @@ RECONNECT_DELAY = 10.0
 
 
 async def _run(cfg: config_mod.MqttConfig, socket_path: str) -> None:
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        with contextlib.suppress(NotImplementedError):  # e.g. Windows/threads
+            loop.add_signal_handler(sig, stop.set)
     bridge = Bridge(cfg, socket_path)
-    while True:
+    while not stop.is_set():
         try:
-            await bridge.run()
+            await bridge.run(stop)  # returns cleanly once `stop` is set
         except Exception as e:
             log.warning("bridge disconnected (%s); retrying in %.0fs",
                         e, RECONNECT_DELAY)
-            await asyncio.sleep(RECONNECT_DELAY)
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(stop.wait(), timeout=RECONNECT_DELAY)
 
 
 def main() -> None:
