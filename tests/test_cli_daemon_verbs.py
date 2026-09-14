@@ -111,3 +111,43 @@ def test_parse_output_of_shorthand_and_bad_mode():
     import pytest
     with pytest.raises(ParseError, match="bad mode"):
         parse_tokens(["-output", "bogus", "-poweron"])
+
+
+async def test_run_via_daemon_stops_chain_on_dispatch_failure(capsys):
+    calls = []
+
+    async def dispatcher(cmd, args, devices):
+        calls.append(cmd)
+        if cmd == "sethdmi":
+            raise ValueError("no such device")     # -> ok:false
+        return {"tv1": "ok"}
+
+    server = await _server(dispatcher)
+    try:
+        inv = parse_tokens(["-sethdmi", "2", "-mute"])
+        rc = await asyncio.wait_for(
+            run_via_daemon(inv, server.socket_path), timeout=5)
+    finally:
+        await server.stop()
+    assert rc == 1
+    assert calls == ["sethdmi"]                     # chain stopped; -mute skipped
+    assert "no such device" in capsys.readouterr().err
+
+
+async def test_run_via_daemon_flags_per_device_error_but_continues(capsys):
+    calls = []
+
+    async def dispatcher(cmd, args, devices):
+        calls.append(cmd)
+        return {"tv1": {"error": "TV rejected"}}    # ok:true + per-device error
+
+    server = await _server(dispatcher)
+    try:
+        inv = parse_tokens(["-mute", "-backlight", "50"])
+        rc = await asyncio.wait_for(
+            run_via_daemon(inv, server.socket_path), timeout=5)
+    finally:
+        await server.stop()
+    assert rc == 1                                  # per-device error flags failure
+    assert calls == ["mute", "backlight"]           # ...but the chain keeps going
+    assert "TV rejected" in capsys.readouterr().out

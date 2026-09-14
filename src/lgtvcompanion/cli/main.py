@@ -140,6 +140,13 @@ def print_help() -> None:
 # -- execution paths ------------------------------------------------------------
 
 
+def _has_device_error(results: Any) -> bool:
+    """A per-device failure comes back as {device_id: {"error": ...}} inside an
+    otherwise-ok response — the TV rejected a valid command."""
+    return isinstance(results, dict) and any(
+        isinstance(v, dict) and "error" in v for v in results.values())
+
+
 async def run_via_daemon(inv: Invocation, socket_path: str) -> int:
     client = ipc.IpcClient(socket_path)
     await client.connect()
@@ -148,10 +155,16 @@ async def run_via_daemon(inv: Invocation, socket_path: str) -> int:
         for cmd, args in inv.commands:
             resp = await client.request(cmd.name, args, inv.devices)
             if not resp.get("ok"):
+                # The command couldn't be dispatched (bad command/device, daemon
+                # error) so it touched nothing — stop the chain rather than let
+                # e.g. `-sethdmi 2 -mute` land half-applied.
                 print(f"error: {resp.get('error')}", file=sys.stderr)
                 status = 1
-                continue
-            print(format_result(resp.get("results"), inv.output_mode, inv.output_key))
+                break
+            results = resp.get("results")
+            print(format_result(results, inv.output_mode, inv.output_key))
+            if _has_device_error(results):
+                status = 1   # TV rejected it; keep going, but the run failed
     finally:
         await client.close()
     return status
@@ -193,9 +206,11 @@ async def run_direct(inv: Invocation, cfg: config_mod.Config | None,
         # commands (e.g. two -request) don't collide
         for cmd, args in inv.commands:
             if cmd.kind == Kind.META:
+                # can't run without the daemon — like an undispatched command,
+                # so stop the chain (parity with the daemon path)
                 print(f"error: -{cmd.name} needs the daemon", file=sys.stderr)
                 status = 1
-                continue
+                break
             results: dict[str, Any] = {}
             for session in sessions:
                 try:

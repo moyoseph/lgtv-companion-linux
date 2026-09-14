@@ -185,3 +185,13 @@ def test_main_routes_direct_with_config_and_wait_network(
                        "--socket", str(tmp_path / "absent.sock"), "-poweron"])
     assert e.value.code == 0
     assert seen == [("tv1", None, None)]
+
+
+async def test_run_direct_meta_stops_chain(tv, tmp_path, monkeypatch, capsys):
+    _patch_direct(monkeypatch, tv, tmp_path)
+    # -idle is META (needs the daemon); it must stop the chain before -mute runs
+    rc = await cli_main.run_direct(
+        cli_main.parse_tokens(["-idle", "-mute"]), _cfg(), None, None)
+    assert rc == 1
+    assert "needs the daemon" in capsys.readouterr().err
+    assert not any(uri == "audio/setMute" for uri, _ in tv.requests)
