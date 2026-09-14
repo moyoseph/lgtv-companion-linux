@@ -5,6 +5,10 @@ to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.2.5] — 2026-09-14
+
 ### Fixed
 - **Controller input now keeps the screen awake.** The idle monitor's analog-stick
   jitter deadband was also swallowing D-pad/hat presses (discrete -1/0/1) and

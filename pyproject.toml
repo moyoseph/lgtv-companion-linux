@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lgtvcompanion"
-version = "0.2.4"
+version = "0.2.5"
 description = "Keep LG webOS TVs in sync with your Linux PC's power state — a Linux port of JPersson77/LGTVCompanion"
 readme = "README.md"
 license = { text = "MIT" }
