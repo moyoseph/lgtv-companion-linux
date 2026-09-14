@@ -56,13 +56,11 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 timeout = 60
 
-[tool.coverage.run]
-# tray/settings.py is a pure-Qt dialog: CI installs no PySide6, so it can never
-# even be imported there. Excluded from the metric rather than published as
-# permanent dead weight; the non-Qt tray helper (app.py ipc_request) IS tested.
-omit = ["*/lgtvcompanion/tray/settings.py"]
-
 [tool.coverage.report]
+# The coverage/badges CI job installs PySide6 ([tray]) + dbusmock and runs
+# under an offscreen QApplication + dbus-run-session, so tray/settings.py and
+# the D-Bus binding tests are exercised there. tray/app.py:main() (the Qt
+# event-loop shell) keeps a narrow `# pragma: no cover`.
 exclude_also = ["if __name__ == .__main__.:"]
 
 [tool.ruff]
