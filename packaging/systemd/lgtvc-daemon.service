@@ -1,0 +1,18 @@
+[Unit]
+Description=LGTV Companion daemon
+Wants=network-online.target
+After=network-online.target NetworkManager-wait-online.service
+
+[Service]
+Type=simple
+Environment=PYTHONPATH=/opt/lgtv-companion/lib
+ExecStart=/usr/bin/python3 -m lgtvcompanion.daemon.main --config /etc/lgtv-companion/config.json
+Restart=on-failure
+RestartSec=3
+RuntimeDirectory=lgtv-companion
+StateDirectory=lgtv-companion
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

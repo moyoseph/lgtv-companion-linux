@@ -1,0 +1,13 @@
+[Unit]
+Description=LGTV Companion session agent
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Environment=PYTHONPATH=/opt/lgtv-companion/lib
+ExecStart=/usr/bin/python3 -m lgtvcompanion.agent.main
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target

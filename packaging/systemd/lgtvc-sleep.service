@@ -1,0 +1,18 @@
+[Unit]
+Description=Power off LG TV on suspend, on at resume
+Before=sleep.target
+StopWhenUnneeded=yes
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=PYTHONPATH=/opt/lgtv-companion/lib
+ExecStart=/usr/bin/python3 -m lgtvcompanion.cli.main --direct --config /etc/lgtv-companion/config.json -poweroff
+ExecStop=/usr/bin/python3 -m lgtvcompanion.cli.main --direct --config /etc/lgtv-companion/config.json --wait-network -poweron
+TimeoutStartSec=15
+TimeoutStopSec=45
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=sleep.target
