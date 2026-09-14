@@ -109,6 +109,9 @@ def build_dialog(ipc_request):
             self.topology = QCheckBox()
             self.topology.setChecked(g.topology.enabled)
             form.addRow("Display-topology mode", self.topology)
+            self.offline_mode = QCheckBox()
+            self.offline_mode.setChecked(g.offline_mode)
+            form.addRow("Offline mode (no internet)", self.offline_mode)
             return w
 
         def _devices_tab(self, QWidget, QVBoxLayout, QFormLayout, QLineEdit,
@@ -163,6 +166,7 @@ def build_dialog(ipc_request):
             g.on_lock = self.on_lock.currentText()
             g.on_unlock = self.on_unlock.currentText()
             g.topology.enabled = self.topology.isChecked()
+            g.offline_mode = self.offline_mode.isChecked()
             for dev, name, host, mac, ssl, hdmi, guard, wol in self.device_widgets:
                 dev.name = name.text().strip()
                 dev.host = host.text().strip()

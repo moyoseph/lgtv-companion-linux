@@ -5,6 +5,13 @@ to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Offline mode** (`offline_mode`, off by default): a privacy master-switch that
+  guarantees the app makes zero internet connections — disables the daily update
+  check and refuses a non-LAN MQTT broker (a LAN Home Assistant broker still
+  works). TV control was already LAN-only. Toggle with
+  `lgtvc setup offline-mode on|off` or the tray Settings checkbox.
+
 ### Fixed
 - Chained CLI commands now **stop on a dispatch failure** instead of continuing:
   if a command can't run (unknown command/device, daemon error) the chain halts

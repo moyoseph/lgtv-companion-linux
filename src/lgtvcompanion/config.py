@@ -94,6 +94,7 @@ class GlobalConfig:
     external_api: bool = True
     log_level: str = "info"
     update_check: str = "notify"            # notify | off
+    offline_mode: bool = False              # privacy: the app makes zero internet calls
     dry_run: bool = False
 
 
@@ -228,6 +229,24 @@ def find_config() -> Path | None:
         if p.exists():
             return p
     return None
+
+
+def is_lan_host(host: str) -> bool:
+    """True if `host` is definitely on the local network, WITHOUT resolving DNS
+    (resolving a name is itself a trip off-box). Used by offline_mode to allow a
+    LAN broker while refusing anything that could reach the internet.
+
+    Accepts loopback / private / link-local IPs, `localhost`, and the common
+    local domain suffixes; refuses bare or public hostnames (which would need a
+    resolver and might point anywhere)."""
+    import ipaddress
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_private or ip.is_loopback or ip.is_link_local
+    except ValueError:
+        h = host.lower().rstrip(".")
+        return h == "localhost" or h.endswith(
+            (".local", ".lan", ".home", ".internal"))
 
 
 def import_legacy(legacy_dir: Path = LEGACY_DIR, *, device_id: str = "tv1") -> tuple[Config, str | None]:

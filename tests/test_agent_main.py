@@ -313,3 +313,12 @@ def test_agent_main_swallows_keyboard_interrupt(monkeypatch):
     monkeypatch.setattr(agent_main.Agent, "run", fake_run)
     monkeypatch.setattr(agent_main.sys, "argv", ["lgtvc-agent"])
     agent_main.main()                          # returns cleanly
+
+
+def test_offline_mode_creates_no_updater(monkeypatch, tmp_path):
+    cfg = config_mod.Config()
+    cfg.global_.update_check = "notify"      # would normally run...
+    cfg.global_.offline_mode = True          # ...but offline_mode wins
+    a = _agent(monkeypatch, tmp_path, cfg)
+    a._start_update_check(None)
+    assert not hasattr(a, "_updater")
