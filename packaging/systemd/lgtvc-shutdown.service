@@ -1,0 +1,16 @@
+[Unit]
+Description=Power off LG TV on shutdown (not reboot)
+Conflicts=reboot.target
+DefaultDependencies=no
+Before=poweroff.target halt.target
+
+[Service]
+Type=oneshot
+Environment=PYTHONPATH=/opt/lgtv-companion/lib
+ExecStart=/usr/bin/python3 -m lgtvcompanion.cli.main --direct --config /etc/lgtv-companion/config.json -poweroff
+TimeoutStartSec=15
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=poweroff.target halt.target

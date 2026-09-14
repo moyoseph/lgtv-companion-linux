@@ -64,6 +64,20 @@ systemctl --user enable --now lgtvc-agent
 
 That's it — reboot and the TV should come on with the PC.
 
+### On a regular distro? Grab a package
+
+Prefer your package manager? Every [release](https://github.com/moyoseph/lgtv-companion-linux/releases)
+ships **.deb / .rpm / Arch** packages (units included, only needs `python3 ≥ 3.11`):
+
+```sh
+sudo apt install ./lgtvcompanion_*_all.deb        # Debian/Ubuntu
+sudo dnf install ./lgtvcompanion-*.noarch.rpm     # Fedora/RHEL
+sudo pacman -U ./lgtvcompanion-*-any.pkg.tar.zst  # Arch
+```
+
+then pair + enable as in steps 3–4. Details: [packaging/README.md](packaging/README.md).
+(On immutable distros like Bazzite, use the venv install above — nothing touches `/usr`.)
+
 - Want the **tray icon + settings window** or **Home Assistant**? Install
   `lgtvcompanion[tray]` or `lgtvcompanion[mqtt]` instead (line 2 above).
 - Prefer a **no-root, user-only** install, or `pipx`/`uv`? See the

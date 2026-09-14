@@ -1,0 +1,4 @@
+#!/bin/sh
+# Distro-package launcher: vendored pure-Python libs under /opt, system python3.
+export PYTHONPATH=/opt/lgtv-companion/lib
+exec /usr/bin/python3 -m lgtvcompanion.cli.main "$@"

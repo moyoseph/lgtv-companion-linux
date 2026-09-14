@@ -10,3 +10,5 @@ dist/
 uv.lock
 .coverage
 coverage.json
+build/
+dist-pkg/
