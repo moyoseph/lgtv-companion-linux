@@ -1,0 +1,18 @@
+[Unit]
+Description=LGTV Companion tray
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+# Only run where a system-tray host (StatusNotifierWatcher) exists — that's
+# KDE, XFCE, MATE, Cinnamon, Budgie, and GNOME *with* an AppIndicator
+# extension. Skip gamescope/Steam Game Mode (registers a watcher but has no
+# usable Qt tray).
+ExecCondition=/bin/sh -c 'case "$XDG_CURRENT_DESKTOP" in *gamescope*|*steamos*|*Steam*) exit 1;; esac; busctl --user list --no-legend | grep -q StatusNotifierWatcher'
+Environment=PYTHONPATH=/opt/lgtv-companion/lib
+ExecStart=/usr/bin/python3 -m lgtvcompanion.tray.app
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=graphical-session.target

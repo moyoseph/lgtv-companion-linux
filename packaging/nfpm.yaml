@@ -6,24 +6,32 @@ maintainer: "moyoseph <moyoseph@users.noreply.github.com>"
 description: |
   Keep LG webOS TVs in sync with your Linux PC's power state: automatic power
   on/off with boot/shutdown/suspend/resume, idle screen blanking, HDMI input
-  management, Wake-on-LAN, and a full CLI. A Linux port of JPersson77's
-  LGTVCompanion.
+  management, Wake-on-LAN, a tray GUI, a Home Assistant/MQTT bridge, and a full
+  CLI. A Linux port of JPersson77's LGTVCompanion.
 vendor: "moyoseph"
 homepage: "https://github.com/moyoseph/lgtv-companion-linux"
 license: "MIT"
 section: utils
 priority: optional
 
-# Pure-Python payload runs on the system interpreter (>= 3.11).
+# Pure-Python payload (app + websockets + dbus-fast + aiomqtt/paho, vendored)
+# runs on the system interpreter (>= 3.11). The tray needs PySide6, a heavy
+# arch-specific Qt stack, so it's pulled from the distro (users get it by
+# default and Qt's system libs come with it) rather than bundled.
 depends:
   - "python3 (>= 3.11)"
+recommends:
+  - "python3-pyside6"
 overrides:
   rpm:
     depends:
       - "python3 >= 3.11"
+    recommends:
+      - "python3-pyside6"
   archlinux:
     depends:
       - "python>=3.11"
+      - "pyside6"
 
 contents:
   - src: ./build/pkgroot/opt/lgtv-companion/lib
@@ -32,14 +40,28 @@ contents:
     dst: /usr/bin/lgtvc
     file_info:
       mode: 0755
+  - src: ./packaging/bin/lgtvc-tray
+    dst: /usr/bin/lgtvc-tray
+    file_info:
+      mode: 0755
+  - src: ./packaging/bin/lgtvc-mqtt
+    dst: /usr/bin/lgtvc-mqtt
+    file_info:
+      mode: 0755
+  - src: ./packaging/icons/lgtvcompanion.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/lgtvcompanion.svg
   - src: ./packaging/systemd/lgtvc-daemon.service
     dst: /usr/lib/systemd/system/lgtvc-daemon.service
   - src: ./packaging/systemd/lgtvc-shutdown.service
     dst: /usr/lib/systemd/system/lgtvc-shutdown.service
   - src: ./packaging/systemd/lgtvc-sleep.service
     dst: /usr/lib/systemd/system/lgtvc-sleep.service
+  - src: ./packaging/systemd/lgtvc-mqtt.service
+    dst: /usr/lib/systemd/system/lgtvc-mqtt.service
   - src: ./packaging/systemd/user/lgtvc-agent.service
     dst: /usr/lib/systemd/user/lgtvc-agent.service
+  - src: ./packaging/systemd/user/lgtvc-tray.service
+    dst: /usr/lib/systemd/user/lgtvc-tray.service
   - dst: /etc/lgtv-companion
     type: dir
     file_info:

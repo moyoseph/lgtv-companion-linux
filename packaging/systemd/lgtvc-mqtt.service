@@ -1,0 +1,17 @@
+[Unit]
+Description=LGTV Companion MQTT / Home Assistant bridge
+After=lgtvc-daemon.service network-online.target
+Wants=network-online.target
+BindsTo=lgtvc-daemon.service
+
+[Service]
+Type=simple
+Environment=PYTHONPATH=/opt/lgtv-companion/lib
+ExecStart=/usr/bin/python3 -m lgtvcompanion.mqtt.main
+Restart=on-failure
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
