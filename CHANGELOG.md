@@ -5,6 +5,10 @@ to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.2.2] — 2026-09-14
+
 ### Added
 - **Native packages** on every release: `.deb`, `.rpm`, and Arch, built with
   nfpm. Pure-Python noarch payload under `/opt/lgtv-companion` + all systemd
