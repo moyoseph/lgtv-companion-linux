@@ -6,6 +6,7 @@
 [![PyPI](https://img.shields.io/pypi/v/lgtvcompanion)](https://pypi.org/project/lgtvcompanion/)
 [![Python](https://img.shields.io/pypi/pyversions/lgtvcompanion)](https://pypi.org/project/lgtvcompanion/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](#license)
+[![SLSA 3](https://slsa.dev/images/gh-badge-level3.svg)](#verifying-a-release-slsa-level-3)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Buy Me a Coffee](https://img.shields.io/badge/%E2%98%95-buy%20me%20a%20coffee-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/moyoseph)
 
@@ -157,6 +158,32 @@ config in `/etc/lgtv-companion/config.json`, and pairing keys in
 - [External API](docs/external-api.md) — event stream + scripting
 - [Parity matrix](docs/parity.md) — vs the Windows app
 - [Troubleshooting](docs/troubleshooting.md) — pairing, WoL, suspend, and more
+
+## Verifying a release (SLSA Level 3)
+
+Every release is built by GitHub Actions and carries **[SLSA](https://slsa.dev)
+Build Level 3** provenance — non-forgeable, Sigstore-signed proof of exactly
+which workflow and commit produced each artifact, generated in an isolated
+[`slsa-github-generator`](https://github.com/slsa-framework/slsa-github-generator)
+workflow (the same trust boundary the upstream Windows app uses).
+
+Grab the artifact you downloaded plus `multiple.intoto.jsonl` from the
+[release](https://github.com/moyoseph/lgtv-companion-linux/releases), then
+verify with [slsa-verifier](https://github.com/slsa-framework/slsa-verifier)
+(≥ v2.7.1):
+
+```sh
+slsa-verifier verify-artifact \
+  --provenance-path multiple.intoto.jsonl \
+  --source-uri github.com/moyoseph/lgtv-companion-linux \
+  --source-tag "v0.2.3" \
+  lgtvcompanion-0.2.3-py3-none-any.whl        # or the .tar.gz / .deb / .rpm / .pkg.tar.zst
+```
+
+A `PASSED: SLSA verification passed` line means the file is authentic and
+untampered. (PyPI installs are separately covered by
+[PEP 740 attestations](https://docs.pypi.org/attestations/) — `pip` verifies
+those automatically.)
 
 ## Support
 
