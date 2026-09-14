@@ -8,6 +8,8 @@ import asyncio
 import json
 import time
 
+import pytest
+
 from lgtvcompanion import ipc
 from lgtvcompanion.daemon.inputdev import EV_KEY, KEY_PRESS
 from lgtvcompanion.daemon.server import IpcServer
@@ -119,3 +121,101 @@ async def test_malformed_frame_gets_error_response():
     writer.close()
     await writer.wait_closed()
     await server.stop()
+
+
+# -- ipc.py edge branches -------------------------------------------------------
+
+async def test_read_frame_connection_error_returns_none():
+    from lgtvcompanion import ipc
+
+    class BadReader:
+        async def readline(self):
+            raise ConnectionResetError("boom")
+
+    assert await ipc.read_frame(BadReader()) is None
+
+
+async def test_read_frame_rejects_oversized_line():
+    from lgtvcompanion import ipc
+    reader = asyncio.StreamReader(limit=ipc.MAX_LINE * 2)
+    reader.feed_data(b"x" * (ipc.MAX_LINE + 5) + b"\n")
+    reader.feed_eof()
+    with pytest.raises(ValueError, match="too large"):
+        await ipc.read_frame(reader)
+
+
+async def test_ipc_client_request_raises_when_server_closes():
+    from lgtvcompanion import ipc
+
+    async def handler(reader, writer):
+        writer.close()                          # drop immediately, no response
+
+    server = await asyncio.start_unix_server(handler, path=short_sock())
+    try:
+        client = ipc.IpcClient(server.sockets[0].getsockname())
+        await client.connect()
+        with pytest.raises(ConnectionError):
+            await asyncio.wait_for(client.request("status"), timeout=2)
+        await client.close()
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+async def test_ipc_subscribe_stops_when_server_closes():
+    from lgtvcompanion import ipc
+
+    async def handler(reader, writer):
+        await reader.readline()                 # consume the subscribe frame
+        writer.close()
+
+    server = await asyncio.start_unix_server(handler, path=short_sock())
+    try:
+        client = ipc.IpcClient(server.sockets[0].getsockname())
+        await client.connect()
+        agen = client.subscribe()
+        with pytest.raises(StopAsyncIteration):
+            await asyncio.wait_for(agen.__anext__(), timeout=2)
+        await client.close()
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+async def test_ipc_close_swallows_wait_closed_error():
+    from lgtvcompanion import ipc
+    server = await asyncio.start_unix_server(lambda r, w: None, path=short_sock())
+    try:
+        client = ipc.IpcClient(server.sockets[0].getsockname())
+        await client.connect()
+
+        async def boom():
+            raise RuntimeError("wait_closed failed")
+
+        client._writer.wait_closed = boom
+        await client.close()                    # must not raise (114-115)
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+# -- WakeOnInput wake() exception -----------------------------------------------
+
+async def test_wake_swallows_callback_exception():
+    async def unreachable():
+        return False
+
+    async def boom():
+        raise RuntimeError("wake failed")
+
+    fired = asyncio.Event()
+
+    async def unreachable_then_flag():
+        fired.set()
+        return False
+
+    w = WakeOnInput(is_tv_reachable=unreachable_then_flag, wake=boom, cooldown_s=0.0)
+    w.notify_input("kbd")
+    await asyncio.wait_for(fired.wait(), timeout=2)
+    await asyncio.sleep(0.02)                   # let _maybe_wake hit the except (63-64)
+    assert not w._busy                          # finally reset it

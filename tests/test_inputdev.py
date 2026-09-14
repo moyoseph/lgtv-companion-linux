@@ -181,3 +181,73 @@ def test_setup_inotify_without_libc_returns_false(monkeypatch):
     m = idev.InputMonitor(lambda *a: None)
     assert m._setup_inotify() is False
     assert m._inotify_fd is None
+
+
+def test_stop_tears_down_inotify_fd():
+    m = idev.InputMonitor(lambda *a: None)
+    r, w = os.pipe()
+    removed = []
+    m._inotify_fd = r
+    m._loop = SimpleNamespace(remove_reader=lambda fd: removed.append(fd))
+    m.stop()
+    assert removed == [r]
+    assert m._inotify_fd is None
+    os.close(w)
+    with contextlib.suppress(OSError):
+        os.close(r)                            # already closed by stop()
+
+
+def test_close_device_removes_reader_and_swallows_double_close():
+    m = idev.InputMonitor(lambda *a: None)
+    r, w = os.pipe()
+    removed = []
+    m._loop = SimpleNamespace(remove_reader=lambda fd: removed.append(fd))
+    m._fds["/dev/input/eventX"] = r
+    os.close(r)                                # force os.close(fd) to raise OSError
+    m._close_device("/dev/input/eventX")       # remove_reader + swallowed OSError
+    assert removed == [r]
+    assert "/dev/input/eventX" not in m._fds
+    os.close(w)
+
+
+async def test_rescan_loop_runs(monkeypatch):
+    monkeypatch.setattr(idev, "RESCAN_FALLBACK_INTERVAL", 0.02)
+    monkeypatch.setattr(idev.glob, "glob", lambda pat: [])
+    scans = {"n": 0}
+    m = idev.InputMonitor(lambda *a: None)
+    real_scan = m._scan
+
+    def counting_scan():
+        scans["n"] += 1
+        real_scan()
+
+    m._scan = counting_scan
+    monkeypatch.setattr(m, "_setup_inotify", lambda: False)
+    m.start()
+    try:
+        for _ in range(200):
+            if scans["n"] >= 2:                 # initial + at least one rescan-loop pass
+                break
+            await asyncio.sleep(0.01)
+        assert scans["n"] >= 2
+    finally:
+        m.stop()
+
+
+def test_stop_closes_open_devices():
+    m = idev.InputMonitor(lambda *a: None)
+    r, w = os.pipe()
+    removed = []
+    m._loop = SimpleNamespace(remove_reader=lambda fd: removed.append(fd))
+    m._fds["/dev/input/event0"] = r            # an open device -> stop() closes it (72)
+    m.stop()
+    assert removed == [r]
+    assert m._fds == {}
+    os.close(w)
+    with contextlib.suppress(OSError):
+        os.close(r)
+
+
+def test_close_device_untracked_path_is_noop():
+    m = idev.InputMonitor(lambda *a: None)
+    m._close_device("/dev/input/never-opened")   # fd is None -> early return (111)

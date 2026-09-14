@@ -205,3 +205,93 @@ async def test_send_buttons_without_socket_path(tv, client):
     tv.pointer_socket_enabled = False
     with pytest.raises(ConnectionError, match="no pointer socket"):
         await send_buttons(client, ["mute"])
+
+
+async def test_send_buttons_wss_builds_ssl_context(client, monkeypatch):
+    # a wss:// pointer socket exercises the SSL-context branch (31-33)
+    async def fake_request(uri, payload=None, **kw):
+        return {"socketPath": "wss://127.0.0.1:3001/"}
+
+    sent: list = []
+
+    class FakeWs:
+        async def send(self, frame):
+            sent.append(frame)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    captured: dict = {}
+
+    def fake_connect(url, ssl=None, open_timeout=None):
+        captured["ssl"] = ssl
+        return FakeWs()
+
+    import lgtvcompanion.ssap.input_socket as isock
+    monkeypatch.setattr(client, "request", fake_request)
+    monkeypatch.setattr(isock.websockets, "connect", fake_connect)
+    await send_buttons(client, ["mute"])
+    assert sent == ["type:button\nname:MUTE\n\n"]
+    assert captured["ssl"] is not None          # an SSLContext was built for wss
+
+
+# -- reader/close edge branches -------------------------------------------------
+
+
+async def test_clean_connection_close_ends_reader(tv, client):
+    # server closes the socket cleanly -> _read_loop's ConnectionClosed branch (174-175)
+    await tv.clients[-1].close()
+    for _ in range(200):
+        if not client.connected:
+            break
+        await asyncio.sleep(0.01)
+    assert not client.connected
+
+
+async def test_request_send_failure_becomes_connection_error(tv, client):
+    import websockets
+
+    async def boom(_frame):
+        raise websockets.WebSocketException("send failed")
+
+    monkeypatch_send = client._ws.send
+    client._ws.send = boom
+    try:
+        with pytest.raises(ConnectionError):
+            await client.request("audio/setMute", {"mute": True})
+    finally:
+        client._ws.send = monkeypatch_send
+
+
+async def test_subscribe_with_payload(tv, client):
+    mid = await client.subscribe("some/uri", lambda m: None, {"p": 1})
+    assert mid.startswith("sub-")
+    # the subscribe frame carried the payload
+    for _ in range(200):
+        if any(u == "some/uri" for u, _ in tv.requests):
+            break
+        await asyncio.sleep(0.01)
+    uri, payload = next((u, p) for u, p in tv.requests if u == "some/uri")
+    assert payload == {"p": 1}
+
+
+async def test_close_swallows_ws_close_error(tv, client):
+    async def boom():
+        raise RuntimeError("close failed")
+
+    client._ws.close = boom
+    await client.close()          # must not raise (249-250)
+    assert not client.connected
+
+
+async def test_abnormal_close_hits_connection_closed_branch(tv, client):
+    # an abnormal close makes the reader raise ConnectionClosed (174-175)
+    await tv.clients[-1].close(code=1011, reason="server error")
+    for _ in range(200):
+        if not client.connected:
+            break
+        await asyncio.sleep(0.01)
+    assert not client.connected

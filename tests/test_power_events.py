@@ -192,3 +192,14 @@ async def test_connect_logind_manager_returns_none_on_error(monkeypatch):
 
     monkeypatch.setattr(power_events, "MessageBus", BrokenBus)
     assert await power_events.connect_logind_manager() is None
+
+
+async def test_resumed_logs_resume_callback_error(monkeypatch):
+    monkeypatch.setattr(power_events.shutil, "which", lambda n: None)  # no inhibitor
+
+    async def boom():
+        raise RuntimeError("resume failed")
+
+    pe = power_events.PowerEvents(
+        on_suspend=boom, on_resume=boom, on_shutdown=boom, on_reboot=boom)
+    await pe._resumed()                         # on_resume raises -> logged (150-151)

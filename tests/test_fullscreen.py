@@ -130,3 +130,24 @@ async def test_available_variants():
 
     err = FakeBus({"NameHasOwner": boom})
     assert await asyncio.wait_for(FullscreenProbe(err).available(), 2.0) is False
+
+
+async def test_probe_swallows_unload_script_error():
+    # the finally-path _unload_script must swallow a failing unloadScript (152-153)
+    bus = FakeBus()
+
+    def run(msg):
+        bus.exported[AGENT_OBJ_PATH].Report(True, "vlc")
+        return Reply()
+
+    def unload_boom(msg):
+        raise RuntimeError("kwin gone")
+
+    bus.handlers.update({
+        "loadScript": lambda msg: Reply([3]),
+        "run": run,
+        "unloadScript": unload_boom,
+    })
+    probe = FullscreenProbe(bus)
+    result = await probe.probe(timeout=1.0)
+    assert result == "vlc"                      # returned despite the unload failure

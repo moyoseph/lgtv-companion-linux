@@ -232,3 +232,92 @@ def test_main_without_config_exits(monkeypatch):
     monkeypatch.setattr(daemon_main.sys, "argv", ["lgtvc-daemon"])
     with pytest.raises(SystemExit, match="no config found"):
         daemon_main.main()
+
+
+# -- small daemon/main branches -------------------------------------------------
+
+async def test_report_activity_notifies_idle_engine(tmp_path):
+    cfg = config_mod.Config(devices=[DeviceConfig(id="tv1", host="127.0.0.1")])
+    cfg.global_.idle.enabled = True
+    d = make_daemon(tmp_path, cfg=cfg)
+    try:
+        before = d.idle_engine._last_activity
+        import time
+        time.sleep(0.01)
+        d._on_report({"activity": True, "key": False})   # pointer noise -> idle only
+        assert d.idle_engine._last_activity > before
+    finally:
+        d.idle_engine.stop()
+
+
+async def test_any_tv_reachable_true(tmp_path):
+    d = make_daemon(tmp_path)
+    d.sessions = [FakeSession("tv1", reachable=True)]
+    assert await d._any_tv_reachable() is True
+
+
+async def test_run_lifecycle_with_power_events_and_dry_run(tmp_path, monkeypatch):
+    import contextlib
+
+    async def no_logind():
+        return None
+
+    monkeypatch.setattr(daemon_main, "connect_logind_manager", no_logind)
+    started = []
+    stopped = []
+
+    class StubPowerEvents:
+        async def start(self):
+            started.append(1)
+
+        async def stop(self):
+            stopped.append(1)
+
+    cfg = config_mod.Config(devices=[DeviceConfig(id="tv1", host="127.0.0.1")])
+    cfg.global_.dry_run = True
+    cfg.global_.power_on_at_boot = False
+    d = make_daemon(tmp_path, cfg=cfg)
+    d.server.socket_path = short_sock()
+    d.power_events = StubPowerEvents()
+    d.sessions = [FakeSession("tv1")]
+
+    task = asyncio.create_task(d.run())
+    try:
+        for _ in range(300):
+            import os
+            if os.path.exists(d.server.socket_path):
+                break
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.05)               # let on_boot + power_events.start run
+        assert started == [1]
+        d._stopping.set()
+        await asyncio.wait_for(task, timeout=5)
+        assert stopped == [1]
+    finally:
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+
+def test_main_root_uses_system_state(tmp_path, monkeypatch):
+    path = tmp_path / "config.json"
+    config_mod.save(config_mod.Config(
+        devices=[DeviceConfig(id="tv1", host="127.0.0.1")]), path)
+    built: dict = {}
+
+    class FakeDaemon:
+        def __init__(self, cfg, keystore, socket_path, **kw):
+            built["state_dir"] = kw.get("state_dir")
+
+        async def run(self):
+            return None
+
+    monkeypatch.setattr(daemon_main, "Daemon", FakeDaemon)
+    monkeypatch.setattr(daemon_main.os, "geteuid", lambda: 0)     # root
+    monkeypatch.setattr(config_mod, "SYSTEM_STATE", tmp_path / "sysstate")
+    monkeypatch.delenv("RUNTIME_DIRECTORY", raising=False)
+    monkeypatch.setattr(daemon_main.sys, "argv",
+                        ["lgtvc-daemon", "--config", str(path)])
+    daemon_main.main()
+    assert built["state_dir"] == tmp_path / "sysstate"

@@ -263,3 +263,53 @@ async def test_run_retries_then_forwards_reports(monkeypatch, tmp_path):
         if a._client is not None:            # close before server.stop(): py3.12+
             await a._client.close()          # wait_closed waits for open conns
         await asyncio.wait_for(server.stop(), 2.0)
+
+
+# -- config-load-except + main() entry ------------------------------------------
+
+async def test_update_check_config_load_error_defaults_notify(monkeypatch, tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text("{ not json")
+    monkeypatch.setattr(config_mod, "find_config", lambda: path)
+    a = Agent(str(tmp_path / "sock"))
+    a._start_update_check(None)               # load raises -> mode stays "notify"
+    try:
+        assert a._updater is not None
+    finally:
+        a._updater.stop()
+
+
+def test_stream_watch_config_load_error(monkeypatch, tmp_path):
+    path = tmp_path / "config.json"
+    path.write_text("{ not json")
+    monkeypatch.setattr(config_mod, "find_config", lambda: path)
+    monkeypatch.setattr(config_mod, "user_config_path", lambda: path)
+    a = Agent(str(tmp_path / "sock"))
+    # no sunshine log + rs is None -> both watchers skipped, no raise
+    a._start_stream_watch()
+    if getattr(a, "_sunshine", None):
+        a._sunshine.stop()
+    if getattr(a, "_proc_stream", None):
+        a._proc_stream.stop()
+
+
+def test_agent_main_entry(monkeypatch, tmp_path):
+    ran = {}
+
+    async def fake_run(self):
+        ran["socket"] = self.socket_path
+
+    monkeypatch.setattr(agent_main.Agent, "run", fake_run)
+    monkeypatch.setattr(agent_main.sys, "argv",
+                        ["lgtvc-agent", "--socket", str(tmp_path / "s.sock")])
+    agent_main.main()
+    assert ran["socket"] == str(tmp_path / "s.sock")
+
+
+def test_agent_main_swallows_keyboard_interrupt(monkeypatch):
+    async def fake_run(self):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(agent_main.Agent, "run", fake_run)
+    monkeypatch.setattr(agent_main.sys, "argv", ["lgtvc-agent"])
+    agent_main.main()                          # returns cleanly

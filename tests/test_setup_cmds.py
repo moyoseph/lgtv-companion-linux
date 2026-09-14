@@ -437,3 +437,8 @@ def test_module_available_real_subprocess():
 def test_run_prints_and_executes(capsys):
     setup_cmds._run([sys.executable, "-c", "pass"])
     assert capsys.readouterr().out.startswith(f"+ {sys.executable}")
+
+
+def test_tray_available_delegates(monkeypatch):
+    monkeypatch.setattr(setup_cmds, "_module_available", lambda p, m: True)
+    assert setup_cmds._tray_available("py") is True

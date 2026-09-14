@@ -287,3 +287,35 @@ async def test_process_stream_watcher_live_loop(monkeypatch):
     finally:
         w.stop()
     assert events == [True]
+
+
+def test_find_sunshine_log_auto_none(monkeypatch):
+    from lgtvcompanion.agent import streams
+    monkeypatch.setattr(streams, "DEFAULT_LOG_LOCATIONS", ("/no/such/a", "/no/such/b"))
+    assert streams.find_sunshine_log("auto") is None
+
+
+def test_sunshine_read_new_no_growth(tmp_path):
+    log = tmp_path / "sunshine.log"
+    log.write_text("line\n")
+    w = SunshineWatcher(log, lambda s: None)
+    w._pos = log.stat().st_size
+    assert w._read_new() == ""              # size == pos -> "" (73)
+
+
+def test_running_process_names_comm_oserror(tmp_path, monkeypatch):
+    from lgtvcompanion.agent import streams
+    proc = tmp_path / "proc"
+    p = proc / "123"
+    p.mkdir(parents=True)
+    (p / "comm").mkdir()                    # comm is a dir -> read_text OSError (111-112)
+    (p / "cmdline").write_bytes(b"/usr/bin/parsecd\x00")
+    real = streams.Path
+
+    class PathShim:
+        def __call__(self, x):
+            return proc if x == "/proc" else real(x)
+
+    monkeypatch.setattr(streams, "Path", PathShim())
+    names = streams._running_process_names()
+    assert "parsecd" in names               # cmdline still parsed despite comm error
