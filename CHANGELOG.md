@@ -5,6 +5,10 @@ to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.2.4] — 2026-09-14
+
 ### Added
 - **Offline mode** (`offline_mode`, off by default): a privacy master-switch that
   guarantees the app makes zero internet connections — disables the daily update
