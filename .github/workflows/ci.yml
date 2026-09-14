@@ -72,7 +72,8 @@ jobs:
         run: |
           docker run --rm -v "$PWD/dist-pkg:/pkg:ro" ubuntu:24.04 bash -eux -c '
             apt-get update -qq
-            apt-get install -y -qq /pkg/lgtvcompanion_*_all.deb
+            echo "available pyside6 packages:"; apt-cache search pyside6 || true
+            apt-get install -y /pkg/lgtvcompanion_*_all.deb
             lgtvc --help >/dev/null
             test -f /usr/lib/systemd/system/lgtvc-daemon.service
             test -f /usr/lib/systemd/user/lgtvc-tray.service
@@ -83,6 +84,7 @@ jobs:
       - name: Smoke-test .rpm (Fedora)
         run: |
           docker run --rm -v "$PWD/dist-pkg:/pkg:ro" fedora:latest bash -eux -c '
+            echo "available pyside6 packages:"; dnf -q search pyside6 2>/dev/null || true
             dnf install -y -q /pkg/lgtvcompanion-*.noarch.rpm
             lgtvc --help >/dev/null
             python3 -c "import PySide6.QtWidgets"
@@ -92,6 +94,7 @@ jobs:
         run: |
           docker run --rm -v "$PWD/dist-pkg:/pkg:ro" archlinux:latest bash -eux -c '
             pacman -Sy --noconfirm >/dev/null
+            echo "available pyside6 packages:"; pacman -Ss pyside6 || true
             pacman -U --noconfirm /pkg/lgtvcompanion-*-any.pkg.tar.zst
             lgtvc --help >/dev/null
             python3 -c "import PySide6.QtWidgets"
