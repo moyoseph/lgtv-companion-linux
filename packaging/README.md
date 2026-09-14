@@ -14,14 +14,21 @@ to every [GitHub Release](https://github.com/moyoseph/lgtv-companion-linux/relea
   `lgtvc-shutdown`, `lgtvc-sleep`, `lgtvc-mqtt` (system) and `lgtvc-agent`,
   `lgtvc-tray` (user). Installed but **not enabled** — pair first.
 - A themed tray icon at `/usr/share/icons/hicolor/scalable/apps/`.
-- Dependencies: `python3 >= 3.11`, and **PySide6** for the tray — pulled from
-  your distro (`python3-pyside6` / `pyside6`) so every install gets the GUI and
-  Qt's system libraries come with it. The tray uses the StatusNotifierItem
-  protocol, so it works on KDE, XFCE, MATE, Cinnamon, Budgie, etc.
+- Dependency: `python3 >= 3.11`. The **tray** needs PySide6:
+  - **Fedora / Arch** package it, so it's a hard dependency — the tray works out
+    of the box.
+  - **Debian / Ubuntu** don't ship PySide6. The rest installs fine; to use the
+    tray, add PySide6 into the app's lib once:
+    ```sh
+    sudo python3 -m pip install --target /opt/lgtv-companion/lib PySide6
+    ```
+  The tray uses the StatusNotifierItem protocol, so it works on KDE, XFCE, MATE,
+  Cinnamon, Budgie, etc.
 
 > **GNOME** removed the legacy tray — install a *Tray/AppIndicator* extension
 > (e.g. "AppIndicator and KStatusNotifierItem Support") for the icon to appear.
-> The tray unit self-skips where no tray host is present.
+> The tray unit self-skips where no tray host is present, and gives up after a
+> few failed starts (e.g. if PySide6 isn't installed).
 
 ## Install
 

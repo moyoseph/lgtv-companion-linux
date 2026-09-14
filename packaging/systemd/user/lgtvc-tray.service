@@ -2,6 +2,10 @@
 Description=LGTV Companion tray
 PartOf=graphical-session.target
 After=graphical-session.target
+# Give up after a few quick failures (e.g. PySide6 not installed on
+# Debian/Ubuntu) instead of restarting forever.
+StartLimitIntervalSec=120
+StartLimitBurst=3
 
 [Service]
 # Only run where a system-tray host (StatusNotifierWatcher) exists — that's

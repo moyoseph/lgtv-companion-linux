@@ -12,6 +12,9 @@ lgtv-companion installed. Next steps:
        systemctl --user enable --now lgtvc-agent                 # idle/session
        systemctl --user enable --now lgtvc-tray                  # tray icon
        sudo systemctl enable --now lgtvc-mqtt                    # Home Assistant
-  GNOME users: the tray needs an AppIndicator/Tray extension.
+  Tray: Fedora/Arch pull PySide6 automatically. Debian/Ubuntu don't package it,
+  so add it once into the app lib:
+       sudo python3 -m pip install --target /opt/lgtv-companion/lib PySide6
+  GNOME also needs an AppIndicator/Tray extension for the icon to appear.
   Docs: https://github.com/moyoseph/lgtv-companion-linux
 MSG

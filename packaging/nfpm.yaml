@@ -15,13 +15,12 @@ section: utils
 priority: optional
 
 # Pure-Python payload (app + websockets + dbus-fast + aiomqtt/paho, vendored)
-# runs on the system interpreter (>= 3.11). The tray needs PySide6, a heavy
-# arch-specific Qt stack, so it's a hard distro dependency (every install gets
-# the GUI by default, and Qt's system libs come along) rather than bundled.
-# Package names differ: Debian/Ubuntu split PySide6 into per-module packages.
+# runs on the system interpreter (>= 3.11). The tray needs PySide6: Fedora and
+# Arch package it, so it's a hard dependency there (tray by default). Debian/
+# Ubuntu don't package PySide6 at all, so the deb has no such dep — tray users
+# there install it once with `pipx install PySide6` (see packaging/README.md).
 depends:
   - "python3 (>= 3.11)"
-  - "python3-pyside6.qtwidgets"
 overrides:
   rpm:
     depends:

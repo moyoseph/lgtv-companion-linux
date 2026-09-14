@@ -72,18 +72,14 @@ jobs:
         run: |
           docker run --rm -v "$PWD/dist-pkg:/pkg:ro" ubuntu:24.04 bash -eux -c '
             apt-get update -qq
-            # PySide6 lives in "universe" (enabled by default on desktop Ubuntu,
-            # not in the minimal image) — enable it to mirror a real desktop.
-            apt-get install -y -qq software-properties-common
-            add-apt-repository -y universe
-            apt-get update -qq
-            echo "available pyside6 packages:"; apt-cache search pyside6 || true
             apt-get install -y /pkg/lgtvcompanion_*_all.deb
             lgtvc --help >/dev/null
             test -f /usr/lib/systemd/system/lgtvc-daemon.service
+            test -f /usr/lib/systemd/system/lgtvc-mqtt.service
             test -f /usr/lib/systemd/user/lgtvc-tray.service
             test -f /usr/share/icons/hicolor/scalable/apps/lgtvcompanion.svg
-            python3 -c "import PySide6.QtWidgets"
+            # Debian/Ubuntu do not package PySide6 — the tray module still
+            # imports (Qt is imported lazily); the bundled MQTT bridge imports.
             PYTHONPATH=/opt/lgtv-companion/lib python3 -c "import aiomqtt, lgtvcompanion.mqtt.main, lgtvcompanion.tray.app"
           '
       - name: Smoke-test .rpm (Fedora)
