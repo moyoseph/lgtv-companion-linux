@@ -23,8 +23,11 @@ if [ -z "$WHEEL" ]; then
   uv build --wheel >/dev/null
   WHEEL="$(ls -1 dist/lgtvcompanion-*-py3-none-any.whl | sort | tail -1)"
 fi
-echo "vendoring $WHEEL + runtime deps -> $LIB"
-uv pip install --quiet --target "$LIB" "$WHEEL"
+echo "vendoring $WHEEL + runtime deps (incl. mqtt) -> $LIB"
+# Bundle the MQTT bridge deps (aiomqtt + paho, pure Python). The tray's PySide6
+# is NOT vendored — it's a heavy arch-specific Qt stack, so it's a distro
+# dependency instead (see nfpm.yaml).
+uv pip install --quiet --target "$LIB" "${WHEEL}[mqtt]"
 
 # Make the payload portable pure-Python: drop compiled extensions, caches, bin/
 find "$LIB" -name '*.so' -delete

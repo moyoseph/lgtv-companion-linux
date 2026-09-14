@@ -7,8 +7,17 @@ to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - **Native packages** on every release: `.deb`, `.rpm`, and Arch, built with
-  nfpm. Pure-Python noarch payload under `/opt/lgtv-companion` + systemd units;
-  only needs `python3 ≥ 3.11`. See [packaging/README.md](packaging/README.md).
+  nfpm. Pure-Python noarch payload under `/opt/lgtv-companion` + all systemd
+  units; only needs `python3 ≥ 3.11`. See [packaging/README.md](packaging/README.md).
+  The **MQTT/Home Assistant bridge is bundled**. The **tray GUI** is included
+  and pulls PySide6 automatically on Fedora/Arch (a one-line `pip --target`
+  install on Debian/Ubuntu, which don't package PySide6); it works on any
+  StatusNotifierItem desktop (KDE/XFCE/MATE/Cinnamon/…; GNOME needs an
+  AppIndicator extension). Each release's packages are install-smoke-tested in
+  Ubuntu/Fedora/Arch containers.
+
+### Changed
+- Tray icon: prefer a bundled hicolor icon so it renders on any desktop/theme.
 
 ## [0.2.1] — 2026-09-14
 

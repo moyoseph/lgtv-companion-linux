@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <!-- LGTV Companion tray icon: a simple TV/monitor, theme-neutral -->
+  <rect x="5" y="9" width="38" height="26" rx="3" ry="3"
+        fill="none" stroke="currentColor" stroke-width="3"/>
+  <rect x="9" y="13" width="30" height="18" rx="1" ry="1"
+        fill="currentColor" opacity="0.15"/>
+  <line x1="18" y1="39" x2="30" y2="39" stroke="currentColor"
+        stroke-width="3" stroke-linecap="round"/>
+</svg>

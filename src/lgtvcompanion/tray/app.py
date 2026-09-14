@@ -124,7 +124,12 @@ def main() -> None:  # pragma: no cover — Qt/event-loop shell; logic is tested
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
 
-    tray = QSystemTrayIcon(QIcon.fromTheme("video-television", QIcon.fromTheme("display")))
+    # Prefer our bundled hicolor icon (present on every DE), then standard
+    # freedesktop names, so the tray always has an icon regardless of theme.
+    icon = QIcon.fromTheme(
+        "lgtvcompanion",
+        QIcon.fromTheme("video-television", QIcon.fromTheme("display")))
+    tray = QSystemTrayIcon(icon)
     tray.setToolTip("LGTV Companion")
 
     def on_ok(cmd: str, results: dict) -> None:

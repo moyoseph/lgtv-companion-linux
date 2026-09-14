@@ -1,0 +1,3 @@
+#!/bin/sh
+export PYTHONPATH=/opt/lgtv-companion/lib
+exec /usr/bin/python3 -m lgtvcompanion.mqtt.main "$@"

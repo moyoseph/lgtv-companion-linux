@@ -53,6 +53,55 @@ jobs:
           name: dist
           path: dist/*
 
+  packages:
+    # Build the .deb/.rpm/Arch packages and install-smoke-test each in its
+    # native container: `lgtvc --help`, units present, the vendored MQTT bridge
+    # imports, and the distro PySide6 dependency actually resolved (tray works).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v10.1.0
+      - name: Build packages
+        run: |
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.47.0
+          export PATH="$PATH:$(go env GOPATH)/bin"
+          VER="$(grep -m1 '^version' pyproject.toml | sed 's/.*"\(.*\)".*/\1/')"
+          VERSION="$VER" packaging/build.sh
+          ls -1 dist-pkg/
+      - name: Smoke-test .deb (Ubuntu)
+        run: |
+          docker run --rm -v "$PWD/dist-pkg:/pkg:ro" ubuntu:24.04 bash -eux -c '
+            apt-get update -qq
+            apt-get install -y /pkg/lgtvcompanion_*_all.deb
+            lgtvc --help >/dev/null
+            test -f /usr/lib/systemd/system/lgtvc-daemon.service
+            test -f /usr/lib/systemd/system/lgtvc-mqtt.service
+            test -f /usr/lib/systemd/user/lgtvc-tray.service
+            test -f /usr/share/icons/hicolor/scalable/apps/lgtvcompanion.svg
+            # Debian/Ubuntu do not package PySide6 — the tray module still
+            # imports (Qt is imported lazily); the bundled MQTT bridge imports.
+            PYTHONPATH=/opt/lgtv-companion/lib python3 -c "import aiomqtt, lgtvcompanion.mqtt.main, lgtvcompanion.tray.app"
+          '
+      - name: Smoke-test .rpm (Fedora)
+        run: |
+          docker run --rm -v "$PWD/dist-pkg:/pkg:ro" fedora:latest bash -eux -c '
+            echo "available pyside6 packages:"; dnf -q search pyside6 2>/dev/null || true
+            dnf install -y -q /pkg/lgtvcompanion-*.noarch.rpm
+            lgtvc --help >/dev/null
+            python3 -c "import PySide6.QtWidgets"
+            PYTHONPATH=/opt/lgtv-companion/lib python3 -c "import aiomqtt, lgtvcompanion.mqtt.main"
+          '
+      - name: Smoke-test Arch package
+        run: |
+          docker run --rm -v "$PWD/dist-pkg:/pkg:ro" archlinux:latest bash -eux -c '
+            pacman -Sy --noconfirm >/dev/null
+            echo "available pyside6 packages:"; pacman -Ss pyside6 || true
+            pacman -U --noconfirm /pkg/lgtvcompanion-*-any.pkg.tar.zst
+            lgtvc --help >/dev/null
+            python3 -c "import PySide6.QtWidgets"
+            PYTHONPATH=/opt/lgtv-companion/lib python3 -c "import aiomqtt, lgtvcompanion.mqtt.main"
+          '
+
   badges:
     # The "full" coverage job: installs the tray (PySide6) + D-Bus system libs
     # and runs the whole suite under an offscreen QApplication and a real
