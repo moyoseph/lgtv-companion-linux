@@ -7,6 +7,28 @@ to [Semantic Versioning](https://semver.org/).
 
 _Nothing yet._
 
+## [0.2.1] — 2026-09-14
+
+Maintenance & quality release. No behavior changes — existing configs and
+commands work exactly as in 0.2.0.
+
+### Added
+- **Ships type hints** (`py.typed`, PEP 561): downstream projects and editors
+  now see the package's inline types.
+- Project metadata: a Funding link and a refreshed, Bazzite-first README with
+  live CI / coverage / PyPI badges.
+
+### Changed
+- Internal: the tray app's menu-building was refactored into testable helpers
+  (`build_menu`), and a dead helper was removed from `setup`. No user-visible
+  difference.
+
+### Quality (not user-facing, for the curious)
+- Test coverage raised from ~53% to **99%** (486 tests), including the Qt tray
+  UI (offscreen) and real D-Bus signal binding, run in CI.
+- CI hardening: uv-based matrix (Python 3.11–3.13), auto-updating badges,
+  Dependabot, and a Trusted-Publishing release workflow.
+
 ## [0.2.0] — 2026-09-12
 
 Feature release addressing the remaining gaps and several upstream requests.
