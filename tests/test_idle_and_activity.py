@@ -47,9 +47,25 @@ def test_mouse_debounce_needs_three_samples():
 
 def test_abs_deadband_filters_stick_jitter():
     f = ActivityFilter()
-    f.is_activity("pad", EV_ABS, 0, 1000)          # baseline
+    f.is_activity("pad", EV_ABS, 0, 1000)          # baseline (ABS_X, a stick)
     assert f.is_activity("pad", EV_ABS, 0, 1500) is False   # jitter
     assert f.is_activity("pad", EV_ABS, 0, 9000) is True    # real motion
+
+
+def test_dpad_hat_counts_as_activity():
+    # D-pad/hat axes are discrete (-1/0/1); the stick deadband would drop them.
+    f = ActivityFilter()
+    assert f.is_activity("pad", EV_ABS, 0x10, -1) is True   # ABS_HAT0X pressed
+    assert f.is_activity("pad", EV_ABS, 0x11, 1) is True    # ABS_HAT0Y pressed
+    assert f.is_activity("pad", EV_ABS, 0x10, 0) is False   # released/centered
+
+
+def test_trigger_pull_counts_as_activity():
+    # Triggers rest at 0 with a 0..255 range — always below the stick deadband.
+    f = ActivityFilter()
+    assert f.is_activity("pad", EV_ABS, 0x05, 255) is True  # ABS_RZ full pull
+    assert f.is_activity("pad", EV_ABS, 0x02, 200) is True  # ABS_Z pull
+    assert f.is_activity("pad", EV_ABS, 0x05, 10) is False  # rest/noise
 
 
 # --- VetoEngine -------------------------------------------------------------

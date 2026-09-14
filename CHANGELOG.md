@@ -5,7 +5,16 @@ to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+- **Controller input now keeps the screen awake.** The idle monitor's analog-stick
+  jitter deadband was also swallowing D-pad/hat presses (discrete -1/0/1) and
+  trigger pulls (0..255) — so navigating with a gamepad (e.g. a Steam Controller)
+  registered no activity and the TV would blank mid-use. D-pads and triggers now
+  bypass the deadband; real sticks keep it.
+- **Faster, more reliable PC-presence for Home Assistant** (MQTT bridge): on a
+  clean shutdown the bridge now publishes `offline` itself (the retained Will
+  only fires on an *ungraceful* drop), and the keepalive dropped from 60s to 30s
+  so a hard power-off is detected in ~45s instead of ~90s.
 
 ## [0.2.4] — 2026-09-14
 
