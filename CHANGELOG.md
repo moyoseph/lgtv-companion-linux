@@ -5,7 +5,12 @@ to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+- Chained CLI commands now **stop on a dispatch failure** instead of continuing:
+  if a command can't run (unknown command/device, daemon error) the chain halts
+  with exit 1, so `lgtvc -sethdmi 2 -mute` can't land half-applied. Per-device
+  TV errors keep going (one TV failing shouldn't abort a multi-TV chain) but now
+  also set a non-zero exit so scripts can detect them.
 
 ## [0.2.3] — 2026-09-14
 
