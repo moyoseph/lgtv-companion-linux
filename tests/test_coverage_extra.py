@@ -310,3 +310,20 @@ def test_unknown_keys_are_tolerated(tmp_path):
 
 def test_valid_config_has_no_problems():
     assert config_mod.validate(_cfg()) == []
+
+
+import sys  # noqa: E402
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"),
+                    reason="abstract AF_UNIX sockets are Linux-only")
+def test_sdnotify_abstract_namespace_socket(monkeypatch):
+    srv = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+    srv.bind("\0lgtvc-test-notify")             # abstract namespace
+    srv.settimeout(2)
+    monkeypatch.setenv("NOTIFY_SOCKET", "@lgtvc-test-notify")
+    try:
+        sdnotify.ready()                        # '@' -> '\0' translation (line 14)
+        assert srv.recv(64) == b"READY=1"
+    finally:
+        srv.close()

@@ -10,6 +10,7 @@ import ctypes.util
 import logging
 import os
 import struct
+import pytest
 from types import SimpleNamespace
 
 from lgtvcompanion.daemon import inputdev as idev
@@ -251,3 +252,18 @@ def test_stop_closes_open_devices():
 def test_close_device_untracked_path_is_noop():
     m = idev.InputMonitor(lambda *a: None)
     m._close_device("/dev/input/never-opened")   # fd is None -> early return (111)
+
+
+import sys  # noqa: E402
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux inotify")
+async def test_setup_inotify_real_watch():
+    m = idev.InputMonitor(lambda *a: None)
+    m._loop = asyncio.get_running_loop()
+    ok = m._setup_inotify()                     # real libc inotify on /dev/input
+    try:
+        assert ok is True
+        assert m._inotify_fd is not None
+    finally:
+        m.stop()
