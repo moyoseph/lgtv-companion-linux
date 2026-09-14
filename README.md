@@ -75,7 +75,24 @@ sudo dnf install ./lgtvcompanion-*.noarch.rpm     # Fedora/RHEL
 sudo pacman -U ./lgtvcompanion-*-any.pkg.tar.zst  # Arch
 ```
 
-then pair + enable as in steps 3–4. Details: [packaging/README.md](packaging/README.md).
+then pair + enable as in steps 3–4. The MQTT bridge is bundled; the tray GUI is
+too, but its Qt library (PySide6) is handled differently per distro:
+
+- **Fedora / Arch** — PySide6 is pulled automatically; the tray just works.
+- **Ubuntu / Debian** — these **don't package PySide6**, so add it once for the
+  tray (everything else works without it):
+  ```sh
+  sudo python3 -m pip install --target /opt/lgtv-companion/lib PySide6
+  ```
+- **GNOME** (any distro) removed the legacy tray — install + enable a tray
+  extension for the icon to appear, e.g.:
+  ```sh
+  sudo dnf install gnome-shell-extension-appindicator          # Fedora
+  sudo apt install gnome-shell-extension-appindicator          # Ubuntu/Debian
+  # then enable "AppIndicator and KStatusNotifierItem Support" in Extensions
+  ```
+
+Full details: [packaging/README.md](packaging/README.md).
 (On immutable distros like Bazzite, use the venv install above — nothing touches `/usr`.)
 
 - Want the **tray icon + settings window** or **Home Assistant**? Install
