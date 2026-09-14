@@ -4,18 +4,18 @@ on:
   push:
     tags: ["v*"]
 
-# No API token: PyPI trusts this workflow via OpenID Connect.
-# One-time setup on PyPI → Manage → Publishing → "Add a pending publisher":
-#   Owner: moyoseph   Repo: lgtv-companion-linux
-#   Workflow: release.yml   Environment: pypi
-permissions:
-  contents: write        # create the GitHub Release
-  id-token: write        # OIDC token for PyPI Trusted Publishing
+# Least privilege at the top; each job grants only what it needs.
+permissions: {}
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     environment: pypi
+    permissions:
+      contents: write        # create the GitHub Release + upload assets
+      id-token: write         # OIDC token for PyPI Trusted Publishing
+    outputs:
+      hashes: ${{ steps.hash.outputs.hashes }}
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10.1.0
@@ -29,6 +29,13 @@ jobs:
           export PATH="$PATH:$(go env GOPATH)/bin"
           VER="${GITHUB_REF_NAME#v}"
           VERSION="$VER" packaging/build.sh "dist/lgtvcompanion-${VER}-py3-none-any.whl"
+      - name: Generate subject hashes for SLSA provenance
+        id: hash
+        shell: bash
+        # Hash every release artifact BEFORE publishing, so the PEP 740
+        # .publish.attestation files aren't among the SLSA subjects.
+        run: |
+          echo "hashes=$(sha256sum dist/*.whl dist/*.tar.gz dist-pkg/* | base64 -w0)" >> "$GITHUB_OUTPUT"
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
       - name: Create GitHub Release
@@ -39,5 +46,23 @@ jobs:
           --title "${{ github.ref_name }}"
           --notes "See [CHANGELOG.md](CHANGELOG.md) for details. Native
           packages (.deb / .rpm / Arch) are attached below; or
-          \`pip install lgtvcompanion\`."
+          \`pip install lgtvcompanion\`. Releases carry SLSA Build Level 3
+          provenance (\`multiple.intoto.jsonl\`) — verify with slsa-verifier
+          (see the README)."
           dist/* dist-pkg/*
+
+  # SLSA Build Level 3: sign provenance for all release artifacts in an
+  # isolated, audited reusable workflow (the L3 trust boundary), then upload
+  # multiple.intoto.jsonl into the release the build job created.
+  provenance:
+    needs: [build]
+    permissions:
+      actions: read          # read the calling workflow's path
+      id-token: write         # sign the provenance via Sigstore
+      contents: write         # upload provenance to the release
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ needs.build.outputs.hashes }}
+      provenance-name: multiple.intoto.jsonl
+      upload-assets: true
+      upload-tag-name: ${{ github.ref_name }}
