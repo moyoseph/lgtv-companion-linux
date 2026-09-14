@@ -2,8 +2,13 @@
 
 Mirrors upstream's Raw Input handling: key presses count immediately (unless
 ignored), pointer motion needs several samples inside a short window (mouse
-debounce), absolute axes need to move beyond a deadband (controller stick
-jitter), and accelerometer devices are excluded entirely at the monitor level.
+debounce), and analog sticks must move beyond a deadband (stick jitter).
+Accelerometer devices are excluded entirely at the monitor level.
+
+Two controller inputs are *not* jittery analog sticks and must bypass the
+deadband, or they'd never register (Steam Controller / gamepad navigation is
+the common victim): D-pads/hats are discrete (-1/0/1), and triggers rest at 0
+with a tiny 0..255 range — both sit far below the stick deadband.
 """
 
 from __future__ import annotations
@@ -17,6 +22,11 @@ EV_ABS = 0x03
 MOUSE_SAMPLES_REQUIRED = 3     # upstream: mouse must move on >= 3 samples
 SAMPLE_WINDOW_S = 1.0
 ABS_DEADBAND = 2000            # raw units; sticks idle-jitter well below this
+
+# ABS axes that would otherwise be swallowed by the stick deadband:
+ABS_HAT0X, ABS_HAT3Y = 0x10, 0x17               # D-pads: ABS_HAT0X..ABS_HAT3Y
+TRIGGER_CODES = frozenset({0x02, 0x05, 0x09, 0x0a})  # ABS_Z / RZ / GAS / BRAKE
+TRIGGER_THRESHOLD = 60         # above rest/noise, below any deliberate pull
 
 # Curated evdev KEY_* names for config ignored_keys; numeric codes also accepted
 KEY_NAMES = {
@@ -59,7 +69,11 @@ class ActivityFilter:
             self._rel_samples.append(now)
             return len(self._rel_samples) >= MOUSE_SAMPLES_REQUIRED
         if etype == EV_ABS:
-            key = (device, code)
+            if ABS_HAT0X <= code <= ABS_HAT3Y:   # D-pad: discrete, no deadband
+                return value != 0
+            if code in TRIGGER_CODES:            # trigger: rests at 0, tiny range
+                return abs(value) > TRIGGER_THRESHOLD
+            key = (device, code)                 # analog stick: jitter deadband
             last = self._abs_last.get(key)
             self._abs_last[key] = value
             return last is not None and abs(value - last) > ABS_DEADBAND

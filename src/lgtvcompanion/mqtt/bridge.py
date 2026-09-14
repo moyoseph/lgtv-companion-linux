@@ -9,6 +9,7 @@ talking to `/run/lgtv-companion/ipc.sock`.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 
 from ..config import MqttConfig
@@ -18,6 +19,10 @@ from . import discovery as disc
 log = logging.getLogger(__name__)
 
 POLL_INTERVAL = 10.0
+# Lower than aiomqtt's 60s default so that, on a *hard* PC power-off, the broker
+# detects the dropped connection and fires the retained "offline" Will within
+# ~1.5x this (Home Assistant sees the PC gone in seconds, not a minute).
+KEEPALIVE = 30
 
 
 def state_topics_for(device: dict) -> dict[str, str]:
@@ -40,33 +45,59 @@ class Bridge:
         self.socket_path = socket_path
         self._published: dict[str, str] = {}
 
-    async def run(self) -> None:
+    async def run(self, stop: asyncio.Event | None = None) -> None:
         import aiomqtt
         prefix = self.cfg.topic_prefix
-        will = aiomqtt.Will(disc.bridge_availability_topic(prefix), b"offline",
-                            qos=1, retain=True)
+        avail = disc.bridge_availability_topic(prefix)
+        will = aiomqtt.Will(avail, b"offline", qos=1, retain=True)
         async with aiomqtt.Client(
             hostname=self.cfg.host, port=self.cfg.port,
             username=self.cfg.username or None, password=self.cfg.password or None,
-            identifier=self.cfg.client_id, will=will,
+            identifier=self.cfg.client_id, will=will, keepalive=KEEPALIVE,
         ) as client:
-            log.info("connected to MQTT %s:%s", self.cfg.host, self.cfg.port)
-            await client.publish(disc.bridge_availability_topic(prefix), b"online",
-                                 qos=1, retain=True)
+            log.info("connected to MQTT %s:%s (keepalive %ss)",
+                     self.cfg.host, self.cfg.port, KEEPALIVE)
+            await client.publish(avail, b"online", qos=1, retain=True)
             await client.subscribe(disc.command_subscription(prefix))
             ipc = IpcClient(self.socket_path)
             await ipc.connect()
+            poller = asyncio.create_task(self._poll_loop(client, ipc))
             try:
                 await self._announce(client, ipc)
-                poller = asyncio.create_task(self._poll_loop(client, ipc))
-                try:
-                    async for message in client.messages:
-                        await self._handle_command(ipc, str(message.topic),
-                                                   message.payload)
-                finally:
-                    poller.cancel()
+                await self._serve(client, ipc, stop)
             finally:
+                poller.cancel()
                 await ipc.close()
+
+    async def _serve(self, client, ipc: IpcClient,
+                     stop: asyncio.Event | None) -> None:
+        """Dispatch inbound MQTT commands until the broker drops or `stop` is
+        set. On a graceful stop we retract availability *now* — the retained
+        Will only fires on an *ungraceful* drop (minutes later, at the keepalive
+        timeout), so a clean shutdown would otherwise leave a stale "online"."""
+        consumer = asyncio.create_task(self._consume(client, ipc))
+        stopper = asyncio.create_task(stop.wait()) if stop is not None else None
+        tasks = [t for t in (consumer, stopper) if t is not None]
+        try:
+            done, _ = await asyncio.wait(
+                tasks, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await t
+        if stopper is not None and stopper in done:
+            with contextlib.suppress(Exception):
+                await client.publish(
+                    disc.bridge_availability_topic(self.cfg.topic_prefix),
+                    b"offline", qos=1, retain=True)
+        elif consumer in done and consumer.exception() is not None:
+            raise consumer.exception()  # broker dropped -> let _run reconnect
+
+    async def _consume(self, client, ipc: IpcClient) -> None:
+        async for message in client.messages:
+            await self._handle_command(ipc, str(message.topic), message.payload)
 
     async def _announce(self, client, ipc: IpcClient) -> None:
         """Publish HA discovery + initial availability for each device."""

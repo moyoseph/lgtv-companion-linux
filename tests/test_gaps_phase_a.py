@@ -161,7 +161,7 @@ async def test_mqtt_run_retry_loop(monkeypatch):
         def __init__(self, cfg, sock):
             pass
 
-        async def run(self):
+        async def run(self, stop=None):
             state["n"] += 1
             if state["n"] == 1:
                 raise RuntimeError("disconnected")

@@ -216,6 +216,45 @@ async def test_bridge_run_end_to_end(monkeypatch):
         await server.stop()
 
 
+async def test_bridge_graceful_stop_publishes_offline(monkeypatch):
+    """A clean shutdown (stop event) retracts availability itself, since the
+    retained Will only fires on an ungraceful drop — and run() returns without
+    needing to be cancelled."""
+    import aiomqtt
+
+    clients: list[FakeAiomqttClient] = []
+    monkeypatch.setattr(aiomqtt, "Client",
+                        lambda **kw: clients.append(c := FakeAiomqttClient(**kw)) or c)
+
+    async def dispatcher(cmd, args, devices):
+        return {"idle_active": False, "devices": {}} if cmd == "status" else {}
+
+    sock = short_sock()
+    server = IpcServer(sock, dispatcher)
+    await server.start()
+    b = Bridge(MqttConfig(topic_prefix="lgtvc"), sock)
+    stop = asyncio.Event()
+    run_task = asyncio.create_task(b.run(stop))
+    try:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + 5.0
+        online = ("lgtvc/bridge/availability", b"online", True)
+        while not clients or online not in clients[0].published:
+            assert loop.time() < deadline, "bridge never came online"
+            await asyncio.sleep(0.01)
+
+        assert clients[0].kwargs["keepalive"] == bridge_mod.KEEPALIVE
+        stop.set()
+        await asyncio.wait_for(run_task, timeout=5.0)  # returns on its own
+        assert ("lgtvc/bridge/availability", b"offline", True) in clients[0].published
+    finally:
+        if not run_task.done():
+            run_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await asyncio.wait_for(run_task, timeout=2.0)
+        await server.stop()
+
+
 # --- _announce / _poll_loop / _status / _handle_command edge cases ------------
 
 async def test_announce_publishes_discovery_and_availability():
