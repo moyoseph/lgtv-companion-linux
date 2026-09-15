@@ -5,6 +5,10 @@ to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.2.6] — 2026-09-15
+
 ### Added
 - **Steam Controller keeps the TV awake in gamescope / Game Mode.** In a
   gamescope session the Steam client claims the controller over hidraw and the
