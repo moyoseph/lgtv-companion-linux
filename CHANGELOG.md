@@ -5,7 +5,18 @@ to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-_Nothing yet._
+### Added
+- **Steam Controller keeps the TV awake in gamescope / Game Mode.** In a
+  gamescope session the Steam client claims the controller over hidraw and the
+  kernel stops emitting its evdev events, so controller-only use let the TV blank
+  mid-session (a keyboard, never claimed by Steam, still worked). The agent now
+  reads the controller's `/dev/hidraw*` node directly — read-only, so Steam is
+  undisturbed — with an offset-agnostic detector that ignores the idle carrier
+  stream and fails safe on anything it can't parse. On by default (`steam_controller`,
+  inert without a Valve `28de` controller); toggle with `lgtvc setup
+  steam-controller on|off` or the tray checkbox. Diagnose access/input with
+  `lgtvc setup hidraw-scan [--seconds N]`. Controller input unblanks the TV but
+  won't power on a fully-off one.
 
 ## [0.2.5] — 2026-09-14
 

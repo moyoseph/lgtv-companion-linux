@@ -254,3 +254,12 @@ def test_offline_mode_round_trips(tmp_path):
     path = tmp_path / "config.json"
     config_mod.save(cfg, path)
     assert config_mod.load(path).global_.offline_mode is True
+
+
+def test_steam_controller_round_trips(tmp_path):
+    cfg = config_mod.Config(devices=[config_mod.DeviceConfig(id="tv1", host="h")])
+    assert cfg.global_.steam_controller.enabled is True   # on by default
+    cfg.global_.steam_controller.enabled = False
+    path = tmp_path / "config.json"
+    config_mod.save(cfg, path)
+    assert config_mod.load(path).global_.steam_controller.enabled is False

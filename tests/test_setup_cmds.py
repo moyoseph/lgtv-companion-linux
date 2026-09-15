@@ -464,3 +464,44 @@ def test_offline_mode_subcommand_no_config(monkeypatch):
     monkeypatch.setattr(config_mod, "find_config", lambda: None)
     with pytest.raises(SystemExit):
         setup_cmds.cmd_offline_mode(SimpleNamespace(state="on"))
+
+
+def test_steam_controller_subcommand_toggles(monkeypatch, tmp_path, capsys):
+    cfg_path = tmp_path / "config.json"
+    config_mod.save(config_mod.Config(
+        devices=[config_mod.DeviceConfig(id="tv1", host="h")]), cfg_path)
+    monkeypatch.setattr(config_mod, "find_config", lambda: cfg_path)
+    setup_cmds.cmd_steam_controller(SimpleNamespace(state=None))
+    assert capsys.readouterr().out.strip() == "on"       # default on
+    setup_cmds.cmd_steam_controller(SimpleNamespace(state="off"))
+    assert "restart" in capsys.readouterr().out.lower()
+    assert config_mod.load(cfg_path).global_.steam_controller.enabled is False
+
+
+def test_steam_controller_subcommand_no_config(monkeypatch):
+    monkeypatch.setattr(config_mod, "find_config", lambda: None)
+    with pytest.raises(SystemExit):
+        setup_cmds.cmd_steam_controller(SimpleNamespace(state="on"))
+
+
+def test_hidraw_scan_lists_nodes(monkeypatch, capsys):
+    from lgtvcompanion.cli import setup_cmds as sc
+    from lgtvcompanion.daemon import hidraw as hraw
+    monkeypatch.setattr("glob.glob", lambda pat: ["/dev/hidraw3", "/dev/hidraw4"])
+    monkeypatch.setattr(sc.os, "access", lambda p, mode: True)
+    info = {"/dev/hidraw3": (0x28DE, 0x1302, "Steam Controller"),
+            "/dev/hidraw4": (0x045E, 0x028E, "X-Box pad")}
+    monkeypatch.setattr(hraw, "hidraw_info", lambda p: info[p])
+    rc = sc.cmd_hidraw_scan(SimpleNamespace(seconds=0.0))
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "28de:1302" in out and "Valve" in out       # the Steam Controller
+    assert "045e:028e" in out                          # the other pad, listed too
+    assert "--seconds" in out                          # hint to capture
+
+
+def test_hidraw_scan_no_nodes(monkeypatch, capsys):
+    from lgtvcompanion.cli import setup_cmds as sc
+    monkeypatch.setattr("glob.glob", lambda pat: [])
+    assert sc.cmd_hidraw_scan(SimpleNamespace(seconds=0.0)) == 0
+    assert "no /dev/hidraw" in capsys.readouterr().out

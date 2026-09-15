@@ -4,7 +4,9 @@ Runs in the user's graphical session (Plasma desktop or gamescope Game Mode)
 where /dev/input is readable via the seat's uaccess ACL — the SELinux-confined
 system daemon cannot read it. Reports user activity (filtered: mouse debounce,
 stick deadband, ignored keys) and session state (MPRIS playback, fullscreen)
-to the daemon over the IPC socket.
+to the daemon over the IPC socket. In gamescope the Steam client claims the
+controller over hidraw (no evdev events), so a HidrawMonitor reads it directly
+so controller-only use still keeps the TV awake.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ import time
 from .. import config as config_mod
 from .. import ipc
 from ..activity import EV_KEY, ActivityFilter, parse_ignored_keys
+from ..daemon.hidraw import HidrawMonitor
 from ..daemon.inputdev import InputMonitor
 
 log = logging.getLogger("lgtvc-agent")
@@ -39,13 +42,28 @@ def _load_ignored_keys() -> set[int]:
     return parse_ignored_keys(cfg.global_.idle.ignored_keys)
 
 
+def _steam_controller_enabled() -> bool:
+    path = config_mod.find_config()
+    if path is None:
+        return True   # default-on (SteamControllerConfig.enabled)
+    try:
+        return config_mod.load(path).global_.steam_controller.enabled
+    except (ValueError, OSError):
+        return True
+
+
 class Agent:
     def __init__(self, socket_path: str):
         self.socket_path = socket_path
         self._client: ipc.IpcClient | None = None
         self._last_input_report = 0.0
+        self._last_sc_report = 0.0
         self._filter = ActivityFilter(_load_ignored_keys())
         self._monitor = InputMonitor(self._on_input)
+        # In gamescope the Steam client claims the controller over hidraw, so it
+        # emits no evdev events; read it directly to keep the TV awake there.
+        self._sc_monitor = (HidrawMonitor(self._on_sc_input)
+                            if _steam_controller_enabled() else None)
         self._send_queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=16)
         self._state: dict = {"mpris_playing": False, "fullscreen": None}
         # streaming is the OR of all sources (sunshine log + process watch); the
@@ -62,6 +80,16 @@ class Agent:
         self._last_input_report = now
         with contextlib.suppress(asyncio.QueueFull):
             self._send_queue.put_nowait({"activity": True, "key": etype == EV_KEY})
+
+    def _on_sc_input(self, path: str) -> None:
+        # Steam-controller input over hidraw: unblank only (key=False), never
+        # power on a fully-off TV. Throttled like _on_input.
+        now = time.monotonic()
+        if now - self._last_sc_report < INPUT_REPORT_INTERVAL:
+            return
+        self._last_sc_report = now
+        with contextlib.suppress(asyncio.QueueFull):
+            self._send_queue.put_nowait({"activity": True, "key": False})
 
     async def _state_loop(self) -> None:
         from dbus_fast import BusType
@@ -156,6 +184,8 @@ class Agent:
 
     async def run(self) -> None:
         self._monitor.start()
+        if self._sc_monitor is not None:
+            self._sc_monitor.start()
         self._start_stream_watch()
         state_task = asyncio.create_task(self._state_loop())
         try:
@@ -176,6 +206,8 @@ class Agent:
         finally:
             state_task.cancel()
             self._monitor.stop()
+            if self._sc_monitor is not None:
+                self._sc_monitor.stop()
 
 
 def main() -> None:
