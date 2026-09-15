@@ -1,9 +1,14 @@
-"""Pure-Python /dev/input event monitoring (no python-evdev dependency —
-it ships sdist-only and needs kernel headers, a bad fit for immutable OSes).
+"""Pure-Python device monitoring for /dev/input and /dev/hidraw (no python-evdev
+dependency — it ships sdist-only and needs kernel headers, a bad fit for
+immutable OSes).
 
-input_event is struct { timeval, __u16 type, __u16 code, __s32 value } =
-'llHHi' (24 bytes on 64-bit). Hotplug is watched with inotify on /dev/input,
-falling back to periodic rescans if inotify is unavailable.
+`_HotplugMonitor` is the shared skeleton: glob a device class, open each node
+non-blocking, pump it through the event loop, and track hotplug with inotify
+(falling back to periodic rescans). `InputMonitor` reads evdev events
+(struct { timeval, __u16 type, __u16 code, __s32 value } = 'llHHi', 24 bytes on
+64-bit); `HidrawMonitor` (in hidraw.py) reads raw HID reports. Both reuse the
+skeleton by overriding `_accept()` (should we watch this node?) and `_handle()`
+(what to do with the bytes read).
 """
 
 from __future__ import annotations
@@ -48,11 +53,17 @@ def is_accelerometer(fd: int) -> bool:
     return bool(buf[INPUT_PROP_ACCELEROMETER // 8] & (1 << (INPUT_PROP_ACCELEROMETER % 8)))
 
 
-class InputMonitor:
-    """Watches every readable /dev/input/event* and invokes the callback with
-    (device_path, type, code, value) for each event."""
+class _HotplugMonitor:
+    """Watches every readable node matching PATTERN and pumps it through the
+    event loop, with inotify hotplug on WATCH_DIR. Subclasses set the class
+    attributes and override `_accept`/`_handle`."""
 
-    def __init__(self, callback: Callable[[str, int, int, int], None]):
+    PATTERN = ""            # glob, e.g. "/dev/input/event*"
+    WATCH_DIR = b""         # inotify dir, e.g. b"/dev/input"
+    LABEL = "device"        # used in log messages
+    READ_SIZE = 4096        # bytes per os.read
+
+    def __init__(self, callback: Callable) -> None:
         self.callback = callback
         self._fds: dict[str, int] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -65,7 +76,7 @@ class InputMonitor:
         if not self._setup_inotify():
             self._rescan_task = asyncio.get_running_loop().create_task(
                 self._rescan_loop())
-        log.info("input monitor: %d device(s) open", len(self._fds))
+        log.info("%s monitor: %d device(s) open", self.LABEL, len(self._fds))
 
     def stop(self) -> None:
         for path in list(self._fds):
@@ -77,17 +88,28 @@ class InputMonitor:
         if self._rescan_task is not None:
             self._rescan_task.cancel()
 
+    # -- subclass hooks -------------------------------------------------------
+
+    def _accept(self, path: str, fd: int) -> bool:
+        """Whether to keep watching this freshly-opened node."""
+        return True
+
+    def _handle(self, path: str, fd: int, data: bytes) -> None:
+        """Process bytes read from a node (invoke self.callback as appropriate)."""
+        raise NotImplementedError
+
     # -- device management ----------------------------------------------------
 
     def _scan(self) -> None:
-        present = set(glob.glob("/dev/input/event*"))
+        present = set(glob.glob(self.PATTERN))
         errors: list[str] = []
         for path in present - self._fds.keys():
             self._open_device(path, errors)
         for path in self._fds.keys() - present:
             self._close_device(path)
         if not self._fds and errors:
-            log.warning("no input devices readable: %s", "; ".join(errors[:4]))
+            log.warning("no %s devices readable: %s",
+                        self.LABEL, "; ".join(errors[:4]))
 
     def _open_device(self, path: str, errors: list[str] | None = None) -> None:
         try:
@@ -97,8 +119,7 @@ class InputMonitor:
             if errors is not None:
                 errors.append(f"{path}: {e}")
             return
-        if is_accelerometer(fd):
-            log.debug("%s: accelerometer, skipped", path)
+        if not self._accept(path, fd):
             os.close(fd)
             return
         self._fds[path] = fd
@@ -118,16 +139,13 @@ class InputMonitor:
 
     def _on_readable(self, path: str, fd: int) -> None:
         try:
-            data = os.read(fd, EVENT_SIZE * 64)
+            data = os.read(fd, self.READ_SIZE)
         except BlockingIOError:
             return
         except OSError:
             self._close_device(path)
             return
-        for off in range(0, len(data) - EVENT_SIZE + 1, EVENT_SIZE):
-            _sec, _usec, etype, code, value = struct.unpack_from(
-                EVENT_FORMAT, data, off)
-            self.callback(path, etype, code, value)
+        self._handle(path, fd, data)
 
     # -- hotplug ---------------------------------------------------------------
 
@@ -140,7 +158,7 @@ class InputMonitor:
             fd = libc.inotify_init1(os.O_NONBLOCK)
             if fd < 0:
                 return False
-            wd = libc.inotify_add_watch(fd, b"/dev/input", IN_CREATE | IN_DELETE)
+            wd = libc.inotify_add_watch(fd, self.WATCH_DIR, IN_CREATE | IN_DELETE)
             if wd < 0:
                 os.close(fd)
                 return False
@@ -165,3 +183,28 @@ class InputMonitor:
         while True:
             await asyncio.sleep(RESCAN_FALLBACK_INTERVAL)
             self._scan()
+
+
+class InputMonitor(_HotplugMonitor):
+    """Watches every readable /dev/input/event* and invokes the callback with
+    (device_path, type, code, value) for each event."""
+
+    PATTERN = "/dev/input/event*"
+    WATCH_DIR = b"/dev/input"
+    LABEL = "input"
+    READ_SIZE = EVENT_SIZE * 64
+
+    def __init__(self, callback: Callable[[str, int, int, int], None]):
+        super().__init__(callback)
+
+    def _accept(self, path: str, fd: int) -> bool:
+        if is_accelerometer(fd):
+            log.debug("%s: accelerometer, skipped", path)
+            return False
+        return True
+
+    def _handle(self, path: str, fd: int, data: bytes) -> None:
+        for off in range(0, len(data) - EVENT_SIZE + 1, EVENT_SIZE):
+            _sec, _usec, etype, code, value = struct.unpack_from(
+                EVENT_FORMAT, data, off)
+            self.callback(path, etype, code, value)

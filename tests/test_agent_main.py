@@ -104,6 +104,35 @@ def test_mouse_motion_debounced_then_reports(monkeypatch, tmp_path):
     assert a._send_queue.get_nowait() == {"activity": True, "key": False}
 
 
+# -- _on_sc_input (Steam Controller via hidraw) -------------------------------
+
+def test_sc_input_reports_unblank_only(monkeypatch, tmp_path):
+    a = _agent(monkeypatch, tmp_path)
+    a._on_sc_input("/dev/hidraw0")
+    assert a._send_queue.get_nowait() == {"activity": True, "key": False}
+    assert a._send_queue.empty()
+
+
+def test_sc_input_rate_limited(monkeypatch, tmp_path):
+    a = _agent(monkeypatch, tmp_path)
+    a._on_sc_input("/dev/hidraw0")
+    assert a._send_queue.get_nowait() == {"activity": True, "key": False}
+    a._on_sc_input("/dev/hidraw0")                     # within the 1 s window
+    assert a._send_queue.empty()
+
+
+def test_steam_controller_enabled_by_default(monkeypatch, tmp_path):
+    a = _agent(monkeypatch, tmp_path)                  # no config -> default on
+    assert a._sc_monitor is not None
+
+
+def test_steam_controller_can_be_disabled(monkeypatch, tmp_path):
+    cfg = config_mod.Config()
+    cfg.global_.steam_controller.enabled = False
+    a = _agent(monkeypatch, tmp_path, cfg)
+    assert a._sc_monitor is None
+
+
 # -- _state_loop --------------------------------------------------------------
 
 async def test_state_loop_reports_then_dedupes(monkeypatch, tmp_path):
@@ -240,6 +269,8 @@ async def test_run_retries_then_forwards_reports(monkeypatch, tmp_path):
     # exercised by its own test above
     a._monitor.start = _noop
     a._monitor.stop = _noop
+    a._sc_monitor.start = _noop
+    a._sc_monitor.stop = _noop
     a._start_stream_watch = _noop
 
     async def no_state_loop():

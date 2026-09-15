@@ -58,6 +58,14 @@ class WakeOnInputConfig:
 
 
 @dataclass
+class SteamControllerConfig:
+    # In gamescope/Game Mode the Steam client claims the controller over hidraw,
+    # so it emits no evdev events; the agent reads /dev/hidraw* directly to keep
+    # the TV awake. Inert on any system without a Valve (28de) controller.
+    enabled: bool = True
+
+
+@dataclass
 class TopologyConfig:
     enabled: bool = False
     keep_on_boot: bool = False
@@ -84,6 +92,8 @@ class GlobalConfig:
     remote_stream: RemoteStreamConfig = field(default_factory=RemoteStreamConfig)
     topology: TopologyConfig = field(default_factory=TopologyConfig)
     wake_on_input: WakeOnInputConfig = field(default_factory=WakeOnInputConfig)
+    steam_controller: SteamControllerConfig = field(
+        default_factory=SteamControllerConfig)
     mqtt: MqttConfig = field(default_factory=MqttConfig)
     on_lock: str = "none"                   # none | blank | off (on session lock)
     on_unlock: str = "none"                 # none | on (on session unlock)
@@ -157,6 +167,8 @@ def _from_dict(cls, data: dict):
             value = _from_dict(TopologyConfig, value)
         elif attr == "wake_on_input":
             value = _from_dict(WakeOnInputConfig, value)
+        elif attr == "steam_controller":
+            value = _from_dict(SteamControllerConfig, value)
         elif attr == "mqtt":
             value = _from_dict(MqttConfig, value)
         elif attr == "devices":

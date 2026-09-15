@@ -477,6 +477,105 @@ def cmd_offline_mode(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_steam_controller(args: argparse.Namespace) -> int:
+    """Toggle steam_controller: detect Steam Controller input over hidraw, so it
+    keeps the TV awake in gamescope where Steam claims the controller and no
+    evdev events are emitted. Inert without a Valve controller."""
+    cfg_path = config_mod.find_config()
+    if cfg_path is None:
+        sys.exit("no config found — run: lgtvc setup pair --host <tv-ip>")
+    cfg = config_mod.load(cfg_path)
+    if args.state is None:
+        print("on" if cfg.global_.steam_controller.enabled else "off")
+        return 0
+    cfg.global_.steam_controller.enabled = args.state == "on"
+    config_mod.save(cfg, cfg_path)
+    print(f"steam_controller = {args.state}")
+    print("Restart the agent for it to take effect:")
+    print("  systemctl --user restart lgtvc-agent")
+    return 0
+
+
+def _capture_hidraw(path: str, seconds: float) -> None:
+    """Read a hidraw node for `seconds` and summarise report IDs + which byte
+    offsets moved — the on-device check for Steam Controller detection."""
+    import select
+    import time
+    print(f"\ncapturing {path} for {seconds:g}s ...")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError as e:
+        print(f"  cannot open: {e}")
+        return
+    counts: dict[int, int] = {}
+    changed: dict[int, set[int]] = {}
+    last: dict[int, bytes] = {}
+    deadline = time.monotonic() + seconds
+    try:
+        while (remaining := deadline - time.monotonic()) > 0:
+            if not select.select([fd], [], [], remaining)[0]:
+                continue
+            try:
+                data = os.read(fd, 256)
+            except BlockingIOError:
+                continue
+            except OSError:
+                break
+            if not data:
+                continue
+            rid = data[0]
+            counts[rid] = counts.get(rid, 0) + 1
+            prev = last.get(rid)
+            if prev is not None and len(prev) == len(data):
+                offs = changed.setdefault(rid, set())
+                offs.update(i for i, (a, b) in enumerate(zip(data, prev, strict=True))
+                            if a != b)
+            last[rid] = data
+    finally:
+        os.close(fd)
+    if not counts:
+        print("  no reports (is the controller awake? try pressing a button)")
+        return
+    for rid in sorted(counts):
+        offs = sorted(changed.get(rid, set()))
+        print(f"  report 0x{rid:02x}: {counts[rid]} frames, "
+              f"changed offsets: {offs or 'none'}")
+
+
+def cmd_hidraw_scan(args: argparse.Namespace) -> int:
+    """Diagnostic: list /dev/hidraw* nodes (vendor:product, name, readability)
+    and, for readable Valve controllers, capture reports to confirm access and
+    show which bytes move."""
+    import glob as globmod
+
+    from ..daemon.hidraw import VALVE_VID, hidraw_info
+
+    nodes = sorted(globmod.glob("/dev/hidraw*"))
+    if not nodes:
+        print("no /dev/hidraw* nodes found")
+        return 0
+    valve: list[str] = []
+    for path in nodes:
+        vid, pid, name = hidraw_info(path)
+        vidpid = (f"{vid:04x}:{pid:04x}" if vid is not None and pid is not None
+                  else "?")
+        readable = os.access(path, os.R_OK)
+        mark = "  <- Valve" if vid == VALVE_VID else ""
+        print(f"{path}  {vidpid}  "
+              f"{'readable' if readable else 'NO READ ACCESS'}  {name}{mark}")
+        if vid == VALVE_VID and readable:
+            valve.append(path)
+    if not valve:
+        print("\nno readable Valve (28de) controller found — if you have one, "
+              "install Steam's udev rules (steam-devices) and run as the seat user")
+    elif args.seconds > 0:
+        for path in valve:
+            _capture_hidraw(path, args.seconds)
+    else:
+        print(f"\nre-run with --seconds N to capture from: {', '.join(valve)}")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="lgtvc setup")
     sub = parser.add_subparsers(dest="action", required=True)
@@ -524,6 +623,18 @@ def main(argv: list[str]) -> int:
     p.add_argument("state", nargs="?", choices=["on", "off"],
                    help="omit to print the current state")
     p.set_defaults(func=cmd_offline_mode)
+
+    p = sub.add_parser("steam-controller",
+                       help="detect Steam Controller input in gamescope (hidraw)")
+    p.add_argument("state", nargs="?", choices=["on", "off"],
+                   help="omit to print the current state")
+    p.set_defaults(func=cmd_steam_controller)
+
+    p = sub.add_parser("hidraw-scan",
+                       help="diagnose Steam Controller hidraw access + input")
+    p.add_argument("--seconds", type=float, default=0.0,
+                   help="capture reports for N seconds from Valve controllers")
+    p.set_defaults(func=cmd_hidraw_scan)
 
     args = parser.parse_args(argv)
     return args.func(args)

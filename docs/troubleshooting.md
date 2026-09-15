@@ -60,6 +60,32 @@ reports over IPC. Make sure the agent is running:
 systemctl --user status lgtvc-agent
 ```
 
+## The TV blanks while I'm using a Steam Controller in Game Mode (gamescope)
+
+A keyboard keeps the TV awake but the Steam Controller doesn't. This is expected
+of plain evdev monitoring: in a gamescope session the Steam client claims the
+controller over `/dev/hidraw*`, and the kernel `hid-steam` driver then stops
+emitting the controller's evdev events (a keyboard is never claimed, so it still
+works). The agent works around this by reading the controller's hidraw node
+**directly** — it's on by default and inert on any system without a Valve
+(`28de`) controller.
+
+If it isn't working:
+
+```sh
+lgtvc setup hidraw-scan --seconds 3   # is the controller readable? do bytes move?
+lgtvc setup steam-controller          # prints on|off (default: on)
+systemctl --user restart lgtvc-agent  # the agent reads the setting at startup
+```
+
+`hidraw-scan` should list your controller as `… 28de:xxxx  readable … <- Valve`
+and, with `--seconds`, show its report changing while you press buttons. If it
+shows `NO READ ACCESS`, install Steam's udev rules (the `steam-devices` package —
+present by default on Bazzite/Steam Deck) so the seat user can read the node. The
+detector only ever *reads* the controller, so Steam is undisturbed. Controller
+input **unblanks** the TV but won't power on a fully-off TV (use a keyboard for
+that, or turn on wake-on-input).
+
 ## Nothing happens on suspend / resume
 
 Suspend/resume are handled by the `lgtvc-sleep` oneshot unit (bound to
