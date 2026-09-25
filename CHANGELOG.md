@@ -5,6 +5,10 @@ to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.2.7] — 2026-09-25
+
 ### Fixed
 - **Steam Controller detection now survives suspend/resume.** Three hotplug
   bugs compounded: the hidraw monitor's inotify watch pointed at `/dev/hidraw`
