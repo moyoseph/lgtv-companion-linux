@@ -20,46 +20,27 @@ from .harness import short_sock
 # -- WakeOnInput --------------------------------------------------------------
 
 
-async def test_wake_fires_when_tv_unreachable():
-    woke = asyncio.Event()
+async def test_wake_invokes_callback_with_source():
+    woke: list[str] = []
+    done = asyncio.Event()
 
-    async def unreachable():
-        return False
+    async def wake_if_needed(source: str):
+        woke.append(source)
+        done.set()
 
-    async def wake():
-        woke.set()
-
-    w = WakeOnInput(is_tv_reachable=unreachable, wake=wake, cooldown_s=0.0)
+    w = WakeOnInput(wake_if_needed=wake_if_needed, cooldown_s=0.0)
     w.notify_input("kbd")
-    await asyncio.wait_for(woke.wait(), timeout=1)
-
-
-async def test_no_wake_when_tv_reachable():
-    woke: list = []
-
-    async def reachable():
-        return True
-
-    async def wake():
-        woke.append(1)
-
-    w = WakeOnInput(is_tv_reachable=reachable, wake=wake, cooldown_s=0.0)
-    w.notify_input()
-    await asyncio.sleep(0.05)
-    assert woke == []
+    await asyncio.wait_for(done.wait(), timeout=1)
+    assert woke == ["kbd"]
 
 
 async def test_cooldown_suppresses_second_press():
     checks: list = []
 
-    async def unreachable():
-        checks.append(1)
-        return False
+    async def wake_if_needed(source: str):
+        checks.append(source)
 
-    async def wake():
-        pass
-
-    w = WakeOnInput(is_tv_reachable=unreachable, wake=wake, cooldown_s=100.0)
+    w = WakeOnInput(wake_if_needed=wake_if_needed, cooldown_s=100.0)
     # Prime the last-attempt clock so the first press is allowed regardless of
     # the machine's uptime (monotonic() can be < cooldown on a fresh CI runner).
     w._last_attempt = time.monotonic() - 200.0
@@ -71,7 +52,7 @@ async def test_cooldown_suppresses_second_press():
 
 def test_on_event_only_reacts_to_key_press():
     seen: list = []
-    w = WakeOnInput(is_tv_reachable=None, wake=None, cooldown_s=0.0)
+    w = WakeOnInput(wake_if_needed=None, cooldown_s=0.0)
     w.notify_input = lambda src="agent": seen.append(src)   # type: ignore[method-assign]
     w._on_event("/dev/input/event0", 0, 30, 1)              # not EV_KEY
     w._on_event("/dev/input/event0", EV_KEY, 30, 0)         # key release
@@ -202,20 +183,14 @@ async def test_ipc_close_swallows_wait_closed_error():
 # -- WakeOnInput wake() exception -----------------------------------------------
 
 async def test_wake_swallows_callback_exception():
-    async def unreachable():
-        return False
-
-    async def boom():
-        raise RuntimeError("wake failed")
-
     fired = asyncio.Event()
 
-    async def unreachable_then_flag():
+    async def boom(source: str):
         fired.set()
-        return False
+        raise RuntimeError("wake failed")
 
-    w = WakeOnInput(is_tv_reachable=unreachable_then_flag, wake=boom, cooldown_s=0.0)
+    w = WakeOnInput(wake_if_needed=boom, cooldown_s=0.0)
     w.notify_input("kbd")
     await asyncio.wait_for(fired.wait(), timeout=2)
-    await asyncio.sleep(0.02)                   # let _maybe_wake hit the except (63-64)
+    await asyncio.sleep(0.02)                   # let _maybe_wake hit the except
     assert not w._busy                          # finally reset it

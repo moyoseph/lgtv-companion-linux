@@ -26,6 +26,12 @@ from .wake import WakeOnInput
 
 log = logging.getLogger("lgtvc-daemon")
 
+# Wake-on-input never touches an Active TV (it may be showing another HDMI
+# source or app), and never wakes on a rejected pairing key (a WoL+connect
+# would loop on KeyRejected, and each register attempt pops an on-screen
+# pairing prompt).
+NO_WAKE_STATES = frozenset({"Active", "KeyRejected"})
+
 
 class Daemon:
     def __init__(self, cfg: config_mod.Config, keystore: KeyStore, socket_path: str,
@@ -43,8 +49,7 @@ class Daemon:
         self.wake_on_input: WakeOnInput | None = None
         if cfg.global_.wake_on_input.enabled:
             self.wake_on_input = WakeOnInput(
-                is_tv_reachable=self._any_tv_reachable,
-                wake=self._wake_all,
+                wake_if_needed=self._wake_if_tv_off,
                 cooldown_s=cfg.global_.wake_on_input.cooldown_s)
         self.streams = StreamController(cfg.global_.remote_stream, self._managed)
         self.topology: TopologyWatcher | None = None
@@ -190,14 +195,32 @@ class Daemon:
             except Exception as e:
                 log.error("%s: idle wake failed: %s", s.cfg.id, e)
 
-    async def _any_tv_reachable(self) -> bool:
-        for s in self._managed():
-            if await s.is_reachable():
-                return True
-        return False
-
-    async def _wake_all(self) -> None:
-        await self._power_all("on")
+    async def _wake_if_tv_off(self, source: str) -> None:
+        """Wake-on-input decision: probe each managed TV's real power state and
+        power on only the ones that aren't Active. Per-session on purpose — a
+        blanket power-on would run set_hdmi_input on an Active TV showing
+        another source."""
+        sessions = [s for s in self._managed() if not s.busy]
+        if not sessions:
+            return
+        states = await asyncio.gather(*[s.probe_power_state() for s in sessions])
+        if any(st == "KeyRejected" for st in states):
+            log.warning("wake-on-input: stored client key rejected — re-pair "
+                        "with `lgtvc setup pair`")
+        need = [(s, st) for s, st in zip(sessions, states, strict=True)
+                if st not in NO_WAKE_STATES]
+        if not need:
+            return
+        for s, st in need:
+            log.info("key press on %s while %s is %s — waking", source,
+                     s.cfg.id, st)
+        results = await asyncio.gather(*[s.power_on() for s, _ in need],
+                                       return_exceptions=True)
+        for (s, _), r in zip(need, results, strict=True):
+            if isinstance(r, BaseException):
+                log.error("%s: wake failed: %s", s.cfg.id, r)
+            else:
+                log.info("%s: wake -> %s", s.cfg.id, r)
 
     # -- power orchestration -----------------------------------------------------
 

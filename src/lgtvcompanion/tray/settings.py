@@ -115,6 +115,9 @@ def build_dialog(ipc_request):
             self.steam_controller = QCheckBox()
             self.steam_controller.setChecked(g.steam_controller.enabled)
             form.addRow("Detect Steam Controller (gamescope)", self.steam_controller)
+            self.steam_controller_wake = QCheckBox()
+            self.steam_controller_wake.setChecked(g.steam_controller.wake)
+            form.addRow("  Controller can power on the TV", self.steam_controller_wake)
             return w
 
         def _devices_tab(self, QWidget, QVBoxLayout, QFormLayout, QLineEdit,
@@ -171,6 +174,7 @@ def build_dialog(ipc_request):
             g.topology.enabled = self.topology.isChecked()
             g.offline_mode = self.offline_mode.isChecked()
             g.steam_controller.enabled = self.steam_controller.isChecked()
+            g.steam_controller.wake = self.steam_controller_wake.isChecked()
             for dev, name, host, mac, ssl, hdmi, guard, wol in self.device_widgets:
                 dev.name = name.text().strip()
                 dev.host = host.text().strip()

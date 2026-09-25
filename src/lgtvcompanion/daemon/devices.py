@@ -8,7 +8,7 @@ from typing import Any
 
 from ..config import DeviceConfig
 from ..ssap import power
-from ..ssap.client import KeyRejected, SsapClient
+from ..ssap.client import KeyRejected, SsapClient, SsapError
 from ..ssap.commands import (
     Command,
     Kind,
@@ -24,6 +24,10 @@ from ..ssap.wol import send_wol
 log = logging.getLogger(__name__)
 
 KEEPALIVE_INTERVAL = 60.0
+# Wake-on-input probe budget. Short: it sits on the key-press → WoL path when
+# the TV is fully off (silent packet drop -> connect timeout), but long enough
+# for TLS + SSAP register on a live-but-slow TV. Never cfg.timeout (10 s).
+PROBE_TIMEOUT = 3.0
 
 
 class DeviceSession:
@@ -55,12 +59,12 @@ class DeviceSession:
         task.add_done_callback(lambda _t, k=key: self._inflight.pop(k, None))
         return task
 
-    def _new_client(self) -> SsapClient:
+    def _new_client(self, *, timeout: float | None = None) -> SsapClient:
         return SsapClient(
             self.cfg.host,
             use_ssl=self.cfg.ssl,
             client_key=self.keystore.load(self.cfg.id),
-            timeout=self.cfg.timeout,
+            timeout=timeout if timeout is not None else self.cfg.timeout,
             on_new_key=lambda key: self.keystore.save(self.cfg.id, key),
         )
 
@@ -233,15 +237,43 @@ class DeviceSession:
         await self.settle()
         return "on"
 
-    async def is_reachable(self, timeout: float = 1.0) -> bool:
-        port = 3001 if self.cfg.ssl else 3000
+    async def probe_power_state(self, *, timeout: float = PROBE_TIMEOUT) -> str:
+        """Live "is the TV actually on?" probe for the wake-on-input gate.
+
+        A bare TCP probe cannot work here: QuickStart+ TVs keep the API port
+        accepting in Active Standby (they reject the SSAP register with close
+        1008 "Try Again Later", normalized to ConnectionError), so only a real
+        power-state query can tell "on" from "standby-but-reachable".
+
+        Returns a PowerState.value ("Active", "Active Standby", "Screen Off",
+        "Suspend", "Unknown"), or "Unreachable" (TCP refused/timeout, or the
+        standby register rejection), or "KeyRejected" (TV on, stale pairing
+        key — the caller must NOT wake, or every probe pops a pairing prompt).
+        Single attempt, no WoL; when the session isn't connected a throwaway
+        client is used and always closed, so the probe is side-effect-free
+        (a concurrent connect()/keepalive is undisturbed — see power_on)."""
+        if self.client.connected:
+            try:
+                state = await asyncio.wait_for(
+                    power.get_power_state(self.client), timeout)
+            except (ConnectionError, TimeoutError, SsapError):
+                self.power_state = "Unknown"
+                await self.client.close()
+                return "Unreachable"
+            self.power_state = state.value
+            return state.value
+        probe = self._new_client(timeout=timeout)
         try:
-            _, writer = await asyncio.wait_for(
-                asyncio.open_connection(self.cfg.host, port), timeout=timeout)
-            writer.close()
-            return True
-        except (OSError, TimeoutError):
-            return False
+            await probe.connect()
+            state = await power.get_power_state(probe)
+        except KeyRejected:
+            return "KeyRejected"
+        except (ConnectionError, TimeoutError, SsapError, OSError):
+            return "Unreachable"
+        finally:
+            await probe.close()
+        self.power_state = state.value
+        return state.value
 
     # -- command dispatch -----------------------------------------------------
 

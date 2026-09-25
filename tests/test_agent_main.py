@@ -106,17 +106,27 @@ def test_mouse_motion_debounced_then_reports(monkeypatch, tmp_path):
 
 # -- _on_sc_input (Steam Controller via hidraw) -------------------------------
 
-def test_sc_input_reports_unblank_only(monkeypatch, tmp_path):
+def test_sc_input_wakes_by_default(monkeypatch, tmp_path):
+    # steam_controller.wake defaults on: controller input counts as a key press
+    # so the daemon may power on a fully-off TV
     a = _agent(monkeypatch, tmp_path)
     a._on_sc_input("/dev/hidraw0")
-    assert a._send_queue.get_nowait() == {"activity": True, "key": False}
+    assert a._send_queue.get_nowait() == {"activity": True, "key": True}
     assert a._send_queue.empty()
+
+
+def test_sc_input_unblank_only_when_wake_disabled(monkeypatch, tmp_path):
+    cfg = config_mod.Config()
+    cfg.global_.steam_controller.wake = False
+    a = _agent(monkeypatch, tmp_path, cfg)
+    a._on_sc_input("/dev/hidraw0")
+    assert a._send_queue.get_nowait() == {"activity": True, "key": False}
 
 
 def test_sc_input_rate_limited(monkeypatch, tmp_path):
     a = _agent(monkeypatch, tmp_path)
     a._on_sc_input("/dev/hidraw0")
-    assert a._send_queue.get_nowait() == {"activity": True, "key": False}
+    assert a._send_queue.get_nowait() == {"activity": True, "key": True}
     a._on_sc_input("/dev/hidraw0")                     # within the 1 s window
     assert a._send_queue.empty()
 

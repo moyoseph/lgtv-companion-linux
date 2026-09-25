@@ -82,9 +82,37 @@ systemctl --user restart lgtvc-agent  # the agent reads the setting at startup
 and, with `--seconds`, show its report changing while you press buttons. If it
 shows `NO READ ACCESS`, install Steam's udev rules (the `steam-devices` package —
 present by default on Bazzite/Steam Deck) so the seat user can read the node. The
-detector only ever *reads* the controller, so Steam is undisturbed. Controller
-input **unblanks** the TV but won't power on a fully-off TV (use a keyboard for
-that, or turn on wake-on-input).
+detector only ever *reads* the controller, so Steam is undisturbed.
+
+By default controller input can also **power on a fully-off TV**
+(`steam_controller.wake`). The detector can't tell buttons from stick movement,
+so *any* genuine controller input — including picking the controller up — wakes
+an off TV. If you'd rather the controller only unblank:
+
+```sh
+lgtvc setup steam-controller --wake off
+systemctl --user restart lgtvc-agent
+```
+
+## Key presses don't wake the TV from standby (QuickStart+)
+
+Wake-on-input asks the TV for its **real power state** rather than just probing
+the API port: TVs with QuickStart+ (e.g. 2025 OLEDs) keep port 3001 accepting
+connections in Active Standby, so "the port is open" cannot distinguish *on*
+from *standby* (versions before 0.2.7 got this wrong and never woke such TVs).
+A TV that reports `Active` — whatever app or input it is showing — is never
+touched, so wake-on-input still can't yank a TV somebody is watching.
+
+If key presses still don't wake the TV, check the daemon log:
+
+```sh
+journalctl -u lgtvc-daemon -b | grep -i wake
+```
+
+A `stored client key rejected` warning means the TV no longer accepts your
+pairing key — re-pair with `sudo lgtvc setup pair --host <tv-ip>`. (Waking is
+deliberately suppressed on a rejected key, otherwise every probe would pop a
+pairing prompt on-screen.)
 
 ## Nothing happens on suspend / resume
 

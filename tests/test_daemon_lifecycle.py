@@ -72,26 +72,76 @@ async def test_report_streaming_drives_stream_controller(tmp_path):
     assert d.sessions[0].calls == ["blank", "on"]
 
 
-async def test_report_key_activity_wakes_unreachable_tv(tmp_path):
+def _wake_daemon(tmp_path, *sessions):
     cfg = config_mod.Config(devices=[DeviceConfig(id="tv1", host="127.0.0.1")])
     cfg.global_.wake_on_input.enabled = True
     cfg.global_.wake_on_input.cooldown_s = 0.0
     d = make_daemon(tmp_path, cfg=cfg)
-    d.sessions = [FakeSession("tv1", reachable=False)]
-    d._on_report({"activity": True, "key": True})
+    d.sessions = list(sessions)
+    return d
+
+
+async def _settle(d, *, min_calls=1, session=0):
     for _ in range(200):
-        if d.sessions[0].calls:
+        if len(d.sessions[session].calls) >= min_calls:
             break
         await asyncio.sleep(0.01)
-    assert d.sessions[0].calls == ["on"]
+
+
+async def test_report_key_activity_wakes_unreachable_tv(tmp_path):
+    d = _wake_daemon(tmp_path, FakeSession("tv1", probe_state="Unreachable"))
+    d._on_report({"activity": True, "key": True})
+    await _settle(d, min_calls=2)
+    assert d.sessions[0].calls == ["probe", "on"]
+
+
+async def test_report_key_activity_wakes_standby_reachable_tv(tmp_path):
+    # QuickStart+ TVs keep the API port open in Active Standby — the old TCP
+    # gate read that as "on" and never woke. The power probe must.
+    d = _wake_daemon(tmp_path, FakeSession("tv1", probe_state="Active Standby"))
+    d._on_report({"activity": True, "key": True})
+    await _settle(d, min_calls=2)
+    assert d.sessions[0].calls == ["probe", "on"]
+
+
+async def test_report_key_activity_wakes_screen_off_tv(tmp_path):
+    d = _wake_daemon(tmp_path, FakeSession("tv1", probe_state="Screen Off"))
+    d._on_report({"activity": True, "key": True})
+    await _settle(d, min_calls=2)
+    assert d.sessions[0].calls == ["probe", "on"]
+
+
+async def test_no_wake_when_tv_active(tmp_path):
+    d = _wake_daemon(tmp_path, FakeSession("tv1", probe_state="Active"))
+    d._on_report({"activity": True, "key": True})
+    await _settle(d)
+    await asyncio.sleep(0.05)
+    assert d.sessions[0].calls == ["probe"]     # probed, never powered on
+
+
+async def test_no_wake_on_rejected_pairing_key(tmp_path):
+    # Waking would loop on KeyRejected and pop pairing prompts on-screen.
+    d = _wake_daemon(tmp_path, FakeSession("tv1", probe_state="KeyRejected"))
+    d._on_report({"activity": True, "key": True})
+    await _settle(d)
+    await asyncio.sleep(0.05)
+    assert d.sessions[0].calls == ["probe"]
+
+
+async def test_wake_is_per_session(tmp_path):
+    # tv1 Active (never touched), tv2 off (woken) — a blanket power-on would
+    # yank tv1's HDMI input.
+    tv1 = FakeSession("tv1", probe_state="Active")
+    tv2 = FakeSession("tv2", probe_state="Unreachable")
+    d = _wake_daemon(tmp_path, tv1, tv2)
+    d._on_report({"activity": True, "key": True})
+    await _settle(d, min_calls=2, session=1)
+    assert tv1.calls == ["probe"]
+    assert tv2.calls == ["probe", "on"]
 
 
 async def test_report_activity_skipped_while_power_op_in_flight(tmp_path):
-    cfg = config_mod.Config(devices=[DeviceConfig(id="tv1", host="127.0.0.1")])
-    cfg.global_.wake_on_input.enabled = True
-    cfg.global_.wake_on_input.cooldown_s = 0.0
-    d = make_daemon(tmp_path, cfg=cfg)
-    d.sessions = [FakeSession("tv1", reachable=False)]
+    d = _wake_daemon(tmp_path, FakeSession("tv1", probe_state="Unreachable"))
     d.sessions[0].busy = True
     d._on_report({"activity": True, "key": True})
     await asyncio.sleep(0.05)
@@ -250,10 +300,17 @@ async def test_report_activity_notifies_idle_engine(tmp_path):
         d.idle_engine.stop()
 
 
-async def test_any_tv_reachable_true(tmp_path):
+async def test_wake_if_tv_off_no_sessions_is_noop(tmp_path):
     d = make_daemon(tmp_path)
-    d.sessions = [FakeSession("tv1", reachable=True)]
-    assert await d._any_tv_reachable() is True
+    d.sessions = []
+    await d._wake_if_tv_off("kbd")              # nothing to probe -> no raise
+
+
+async def test_wake_failure_is_logged_not_raised(tmp_path):
+    d = make_daemon(tmp_path)
+    d.sessions = [FakeSession("tv1", probe_state="Unreachable", fail=("on",))]
+    await d._wake_if_tv_off("kbd")              # power_on raises -> logged
+    assert d.sessions[0].calls == ["probe", "on"]
 
 
 async def test_run_lifecycle_with_power_events_and_dry_run(tmp_path, monkeypatch):

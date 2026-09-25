@@ -480,17 +480,26 @@ def cmd_offline_mode(args: argparse.Namespace) -> int:
 def cmd_steam_controller(args: argparse.Namespace) -> int:
     """Toggle steam_controller: detect Steam Controller input over hidraw, so it
     keeps the TV awake in gamescope where Steam claims the controller and no
-    evdev events are emitted. Inert without a Valve controller."""
+    evdev events are emitted. Inert without a Valve controller. --wake controls
+    whether controller input may also power on a fully-off TV."""
     cfg_path = config_mod.find_config()
     if cfg_path is None:
         sys.exit("no config found — run: lgtvc setup pair --host <tv-ip>")
     cfg = config_mod.load(cfg_path)
-    if args.state is None:
+    if args.state is None and args.wake is None:
+        # first line stays the bare enabled state for script compatibility
         print("on" if cfg.global_.steam_controller.enabled else "off")
+        print(f"wake = {'on' if cfg.global_.steam_controller.wake else 'off'}")
         return 0
-    cfg.global_.steam_controller.enabled = args.state == "on"
+    if args.state is not None:
+        cfg.global_.steam_controller.enabled = args.state == "on"
+    if args.wake is not None:
+        cfg.global_.steam_controller.wake = args.wake == "on"
     config_mod.save(cfg, cfg_path)
-    print(f"steam_controller = {args.state}")
+    if args.state is not None:
+        print(f"steam_controller = {args.state}")
+    if args.wake is not None:
+        print(f"steam_controller.wake = {args.wake}")
     print("Restart the agent for it to take effect:")
     print("  systemctl --user restart lgtvc-agent")
     return 0
@@ -628,6 +637,8 @@ def main(argv: list[str]) -> int:
                        help="detect Steam Controller input in gamescope (hidraw)")
     p.add_argument("state", nargs="?", choices=["on", "off"],
                    help="omit to print the current state")
+    p.add_argument("--wake", choices=["on", "off"], default=None,
+                   help="controller input may power on a fully-off TV")
     p.set_defaults(func=cmd_steam_controller)
 
     p = sub.add_parser("hidraw-scan",
