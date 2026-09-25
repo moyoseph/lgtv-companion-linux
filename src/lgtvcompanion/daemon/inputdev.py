@@ -30,8 +30,13 @@ EVENT_SIZE = struct.calcsize(EVENT_FORMAT)
 EV_KEY = 0x01
 KEY_PRESS = 1
 
+IN_ATTRIB = 0x00000004
 IN_CREATE = 0x00000100
 IN_DELETE = 0x00000200
+IN_Q_OVERFLOW = 0x00004000
+# struct inotify_event header: wd, mask, cookie, len — then `len` bytes of
+# NUL-padded name.
+_INOTIFY_HEADER = struct.Struct("iIII")
 RESCAN_FALLBACK_INTERVAL = 45.0
 
 INPUT_PROP_ACCELEROMETER = 0x06
@@ -60,6 +65,9 @@ class _HotplugMonitor:
 
     PATTERN = ""            # glob, e.g. "/dev/input/event*"
     WATCH_DIR = b""         # inotify dir, e.g. b"/dev/input"
+    WATCH_PREFIX = b""      # only inotify names with this prefix trigger a
+                            # rescan (empty = all); needed when WATCH_DIR is a
+                            # busy directory like /dev
     LABEL = "device"        # used in log messages
     READ_SIZE = 4096        # bytes per os.read
 
@@ -73,9 +81,12 @@ class _HotplugMonitor:
     def start(self) -> None:
         self._loop = asyncio.get_running_loop()
         self._scan()
-        if not self._setup_inotify():
-            self._rescan_task = asyncio.get_running_loop().create_task(
-                self._rescan_loop())
+        self._setup_inotify()
+        # Always keep the periodic rescan as well: inotify events can be lost
+        # around suspend/resume, and _scan() also revalidates open fds against
+        # re-created same-name nodes (_is_stale).
+        self._rescan_task = asyncio.get_running_loop().create_task(
+            self._rescan_loop())
         log.info("%s monitor: %d device(s) open", self.LABEL, len(self._fds))
 
     def stop(self) -> None:
@@ -103,6 +114,12 @@ class _HotplugMonitor:
     def _scan(self) -> None:
         present = set(glob.glob(self.PATTERN))
         errors: list[str] = []
+        # A node deleted and re-created under the same name (USB re-enumeration
+        # on resume) leaves our fd pointing at the dead predecessor — reopen it.
+        for path in present & self._fds.keys():
+            if self._is_stale(path):
+                self._close_device(path)
+                self._open_device(path, errors)
         for path in present - self._fds.keys():
             self._open_device(path, errors)
         for path in self._fds.keys() - present:
@@ -110,6 +127,13 @@ class _HotplugMonitor:
         if not self._fds and errors:
             log.warning("no %s devices readable: %s",
                         self.LABEL, "; ".join(errors[:4]))
+
+    def _is_stale(self, path: str) -> bool:
+        try:
+            st, fst = os.stat(path), os.fstat(self._fds[path])
+        except OSError:
+            return True
+        return (st.st_ino, st.st_rdev) != (fst.st_ino, fst.st_rdev)
 
     def _open_device(self, path: str, errors: list[str] | None = None) -> None:
         try:
@@ -145,6 +169,9 @@ class _HotplugMonitor:
         except OSError:
             self._close_device(path)
             return
+        if not data:   # EOF: device gone (re-enumerated); free the name for _scan
+            self._close_device(path)
+            return
         self._handle(path, fd, data)
 
     # -- hotplug ---------------------------------------------------------------
@@ -158,7 +185,10 @@ class _HotplugMonitor:
             fd = libc.inotify_init1(os.O_NONBLOCK)
             if fd < 0:
                 return False
-            wd = libc.inotify_add_watch(fd, self.WATCH_DIR, IN_CREATE | IN_DELETE)
+            # IN_ATTRIB: udev applies the uaccess ACL after creating the node,
+            # so a create-time open can fail EACCES — the chmod event retries it.
+            wd = libc.inotify_add_watch(fd, self.WATCH_DIR,
+                                        IN_CREATE | IN_DELETE | IN_ATTRIB)
             if wd < 0:
                 os.close(fd)
                 return False
@@ -172,8 +202,22 @@ class _HotplugMonitor:
     def _on_inotify(self) -> None:
         assert self._inotify_fd is not None
         try:
-            os.read(self._inotify_fd, 4096)
+            data = os.read(self._inotify_fd, 4096)
         except (BlockingIOError, OSError):
+            return
+        # Only rescan when an event names one of our nodes (WATCH_PREFIX) — on a
+        # busy WATCH_DIR like /dev, unrelated churn (ptys…) must not cause scans.
+        # A queue overflow means events were dropped: rescan unconditionally.
+        relevant, off = False, 0
+        while off + _INOTIFY_HEADER.size <= len(data):
+            _wd, mask, _cookie, nlen = _INOTIFY_HEADER.unpack_from(data, off)
+            name = data[off + _INOTIFY_HEADER.size:
+                        off + _INOTIFY_HEADER.size + nlen].rstrip(b"\0")
+            off += _INOTIFY_HEADER.size + nlen
+            if (mask & IN_Q_OVERFLOW or not self.WATCH_PREFIX
+                    or name.startswith(self.WATCH_PREFIX)):
+                relevant = True
+        if not relevant:
             return
         # Small delay lets udev finish applying permissions/ACLs first.
         assert self._loop is not None
@@ -191,6 +235,7 @@ class InputMonitor(_HotplugMonitor):
 
     PATTERN = "/dev/input/event*"
     WATCH_DIR = b"/dev/input"
+    WATCH_PREFIX = b"event"
     LABEL = "input"
     READ_SIZE = EVENT_SIZE * 64
 

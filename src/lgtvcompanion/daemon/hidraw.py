@@ -65,7 +65,11 @@ class HidrawMonitor(_HotplugMonitor):
     node path whenever its controller reports genuine input."""
 
     PATTERN = "/dev/hidraw*"
-    WATCH_DIR = b"/dev/hidraw"
+    # hidraw nodes live directly in /dev (there is no /dev/hidraw directory —
+    # watching that path used to fail silently, losing inotify hotplug), so
+    # watch /dev and filter events down to hidraw* names.
+    WATCH_DIR = b"/dev"
+    WATCH_PREFIX = b"hidraw"
     LABEL = "hidraw"
     READ_SIZE = 256           # a single HID report; SC reports are <=64 bytes
 
