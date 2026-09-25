@@ -92,8 +92,8 @@ class Bridge:
                 await client.publish(
                     disc.bridge_availability_topic(self.cfg.topic_prefix),
                     b"offline", qos=1, retain=True)
-        elif consumer in done and consumer.exception() is not None:
-            raise consumer.exception()  # broker dropped -> let _run reconnect
+        elif consumer in done and (exc := consumer.exception()) is not None:
+            raise exc  # broker dropped -> let _run reconnect
 
     async def _consume(self, client, ipc: IpcClient) -> None:
         async for message in client.messages:
