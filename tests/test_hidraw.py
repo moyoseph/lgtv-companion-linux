@@ -144,6 +144,27 @@ async def test_scan_replaced_node_gets_fresh_detector(monkeypatch, tmp_path):
             m._close_device(path)
 
 
+def test_resume_jump_resets_detectors(monkeypatch):
+    # (CLOCK_BOOTTIME - CLOCK_MONOTONIC) grows by exactly the suspended time; a
+    # jump must hand every node a fresh detector (stale masks / latched runaway
+    # guard would otherwise survive the resume and stay dead until restart).
+    deltas = iter([0.0, 0.0, 0.0, 120.0])       # init, 2 quiet reads, resume
+    monkeypatch.setattr(hraw, "_boottime_delta", lambda: next(deltas))
+    m = hraw.HidrawMonitor(lambda path: None)
+    m._loop = SimpleNamespace(time=lambda: 0.0)
+    m._detectors["/dev/hidraw0"] = before = hraw.SteamControllerActivity()
+    m._handle("/dev/hidraw0", 5, _report(0))
+    m._handle("/dev/hidraw0", 5, _report(1))
+    assert m._detectors["/dev/hidraw0"] is before      # no jump -> kept
+    m._handle("/dev/hidraw0", 5, _report(2))           # jump -> reset
+    assert m._detectors["/dev/hidraw0"] is not before
+    assert m._suspend_epoch == 120.0                   # re-armed, no reset loop
+
+
+def test_boottime_delta_never_raises():
+    assert isinstance(hraw._boottime_delta(), float)
+
+
 def test_eof_read_drops_fd_and_detector():
     m = hraw.HidrawMonitor(lambda path: None)
     r, w = os.pipe()

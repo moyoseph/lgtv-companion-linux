@@ -17,6 +17,11 @@ to [Semantic Versioning](https://semver.org/).
   EOF, revalidates open fds against the node's inode on every scan, and always
   runs the periodic rescan as a backstop — a replaced node gets a fresh detector
   (fresh warmup + runaway guard). The evdev monitor gains the same hardening.
+  On top of that, a resume is detected directly (the CLOCK_BOOTTIME −
+  CLOCK_MONOTONIC delta grows by exactly the suspended time — no logind needed)
+  and all controller detectors are reset: even when the nodes survive suspend
+  untouched, the stale volatility masks and the permanently-latching
+  "unparseable" guard no longer outlive a sleep/wake cycle.
 
 ## [0.2.6] — 2026-09-15
 
