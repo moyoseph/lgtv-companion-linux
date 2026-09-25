@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import asyncio
 import os
+import sys
 from types import SimpleNamespace
+
+import pytest
 
 from lgtvcompanion.daemon import hidraw as hraw
 from lgtvcompanion.daemon import inputdev as idev
@@ -96,7 +99,83 @@ def test_handle_ignores_unknown_path(monkeypatch):
     m._handle("/dev/hidraw-not-watched", 5, _report(0))   # no detector -> no-op
 
 
+# --- hotplug wiring ------------------------------------------------------------
+
+def test_watch_dir_is_dev_with_hidraw_prefix():
+    # hidraw nodes live directly in /dev; watching "/dev/hidraw" (not a
+    # directory) failed silently and lost inotify hotplug — the resume bug.
+    assert hraw.HidrawMonitor.WATCH_DIR == b"/dev"
+    assert hraw.HidrawMonitor.WATCH_PREFIX == b"hidraw"
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="Linux inotify")
+async def test_hidraw_setup_inotify_real_watch():
+    m = hraw.HidrawMonitor(lambda path: None)
+    m._loop = asyncio.get_running_loop()
+    ok = m._setup_inotify()                     # real libc inotify on /dev
+    try:
+        assert ok is True
+    finally:
+        m.stop()
+
+
 # --- scan / cleanup ----------------------------------------------------------
+
+async def test_scan_replaced_node_gets_fresh_detector(monkeypatch, tmp_path):
+    # Same-name re-created node (resume) -> reopened with a NEW detector, so
+    # the warmup mask and the runaway guard start over.
+    fifo = str(tmp_path / "hidraw0")
+    os.mkfifo(fifo)
+    monkeypatch.setattr(idev.glob, "glob", lambda pattern: [fifo])
+    monkeypatch.setattr(hraw, "hidraw_vendor", lambda p: VALVE_VID)
+    m = hraw.HidrawMonitor(lambda path: None)
+    m._loop = asyncio.get_running_loop()
+    try:
+        m._scan()
+        old_ino, old_detector = os.fstat(m._fds[fifo]).st_ino, m._detectors[fifo]
+        os.unlink(fifo)
+        os.mkfifo(fifo)                        # same name, new inode
+        m._scan()
+        # fd numbers get reused — the identity check is inode + detector object
+        assert os.fstat(m._fds[fifo]).st_ino != old_ino
+        assert m._detectors[fifo] is not old_detector
+    finally:
+        for path in list(m._fds):
+            m._close_device(path)
+
+
+def test_resume_jump_resets_detectors(monkeypatch):
+    # (CLOCK_BOOTTIME - CLOCK_MONOTONIC) grows by exactly the suspended time; a
+    # jump must hand every node a fresh detector (stale masks / latched runaway
+    # guard would otherwise survive the resume and stay dead until restart).
+    deltas = iter([0.0, 0.0, 0.0, 120.0])       # init, 2 quiet reads, resume
+    monkeypatch.setattr(hraw, "_boottime_delta", lambda: next(deltas))
+    m = hraw.HidrawMonitor(lambda path: None)
+    m._loop = SimpleNamespace(time=lambda: 0.0)
+    m._detectors["/dev/hidraw0"] = before = hraw.SteamControllerActivity()
+    m._handle("/dev/hidraw0", 5, _report(0))
+    m._handle("/dev/hidraw0", 5, _report(1))
+    assert m._detectors["/dev/hidraw0"] is before      # no jump -> kept
+    m._handle("/dev/hidraw0", 5, _report(2))           # jump -> reset
+    assert m._detectors["/dev/hidraw0"] is not before
+    assert m._suspend_epoch == 120.0                   # re-armed, no reset loop
+
+
+def test_boottime_delta_never_raises():
+    assert isinstance(hraw._boottime_delta(), float)
+
+
+def test_eof_read_drops_fd_and_detector():
+    m = hraw.HidrawMonitor(lambda path: None)
+    r, w = os.pipe()
+    os.close(w)                                # closed write end -> read() = b""
+    m._loop = SimpleNamespace(remove_reader=lambda fd: None)
+    m._fds["/dev/hidraw0"] = r
+    m._detectors["/dev/hidraw0"] = object()
+    m._on_readable("/dev/hidraw0", r)
+    assert "/dev/hidraw0" not in m._fds
+    assert "/dev/hidraw0" not in m._detectors
+
 
 async def test_scan_opens_valve_node(monkeypatch, tmp_path):
     fifo = str(tmp_path / "hidraw0")

@@ -6,6 +6,22 @@ to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Fixed
+- **Steam Controller detection now survives suspend/resume.** Three hotplug
+  bugs compounded: the hidraw monitor's inotify watch pointed at `/dev/hidraw`
+  (not a directory — hidraw nodes live directly in `/dev`), so it silently fell
+  back to a 45 s rescan; an EOF read from a re-enumerated device never evicted
+  the dead fd; and a node re-created under the *same* `/dev/hidrawN` name was
+  never reopened (the scan deduped by path). After a sleep/wake cycle the
+  controller's nodes are re-enumerated and the agent kept reading dead fds until
+  restart. The monitor now watches `/dev` with hidraw-name filtering, evicts on
+  EOF, revalidates open fds against the node's inode on every scan, and always
+  runs the periodic rescan as a backstop — a replaced node gets a fresh detector
+  (fresh warmup + runaway guard). The evdev monitor gains the same hardening.
+  On top of that, a resume is detected directly (the CLOCK_BOOTTIME −
+  CLOCK_MONOTONIC delta grows by exactly the suspended time — no logind needed)
+  and all controller detectors are reset: even when the nodes survive suspend
+  untouched, the stale volatility masks and the permanently-latching
+  "unparseable" guard no longer outlive a sleep/wake cycle.
 - **Wake-on-input now works on QuickStart+ TVs.** The wake gate was a bare TCP
   probe of the API port — but TVs with QuickStart+ (e.g. 2025 OLEDs) keep port
   3001 accepting in Active Standby, so a remote-control power-off read as "TV is
