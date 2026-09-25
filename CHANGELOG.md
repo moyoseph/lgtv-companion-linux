@@ -5,7 +5,23 @@ to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+- **Steam Controller detection now survives suspend/resume.** Three hotplug
+  bugs compounded: the hidraw monitor's inotify watch pointed at `/dev/hidraw`
+  (not a directory — hidraw nodes live directly in `/dev`), so it silently fell
+  back to a 45 s rescan; an EOF read from a re-enumerated device never evicted
+  the dead fd; and a node re-created under the *same* `/dev/hidrawN` name was
+  never reopened (the scan deduped by path). After a sleep/wake cycle the
+  controller's nodes are re-enumerated and the agent kept reading dead fds until
+  restart. The monitor now watches `/dev` with hidraw-name filtering, evicts on
+  EOF, revalidates open fds against the node's inode on every scan, and always
+  runs the periodic rescan as a backstop — a replaced node gets a fresh detector
+  (fresh warmup + runaway guard). The evdev monitor gains the same hardening.
+  On top of that, a resume is detected directly (the CLOCK_BOOTTIME −
+  CLOCK_MONOTONIC delta grows by exactly the suspended time — no logind needed)
+  and all controller detectors are reset: even when the nodes survive suspend
+  untouched, the stale volatility masks and the permanently-latching
+  "unparseable" guard no longer outlive a sleep/wake cycle.
 
 ## [0.2.6] — 2026-09-15
 

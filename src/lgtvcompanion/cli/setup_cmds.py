@@ -537,9 +537,9 @@ def _capture_hidraw(path: str, seconds: float) -> None:
         print("  no reports (is the controller awake? try pressing a button)")
         return
     for rid in sorted(counts):
-        offs = sorted(changed.get(rid, set()))
+        offsets = sorted(changed.get(rid, set()))
         print(f"  report 0x{rid:02x}: {counts[rid]} frames, "
-              f"changed offsets: {offs or 'none'}")
+              f"changed offsets: {offsets or 'none'}")
 
 
 def cmd_hidraw_scan(args: argparse.Namespace) -> int:

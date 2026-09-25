@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -24,6 +25,24 @@ from .inputdev import _HotplugMonitor
 log = logging.getLogger(__name__)
 
 SYSFS_HIDRAW = "/sys/class/hidraw"
+# A jump in (CLOCK_BOOTTIME - CLOCK_MONOTONIC) equals time spent suspended —
+# a logind-free resume signal. Detector state (volatility masks, the runaway
+# guard) is stale after a resume: the controller re-syncs with a burst of
+# changed bytes that can latch the guard permanently, killing detection until
+# the agent restarts. Anything above this many seconds of suspend resets.
+SUSPEND_JUMP = 1.0
+
+
+def _boottime_delta() -> float:
+    """Seconds spent suspended since boot (0.0 where CLOCK_BOOTTIME is
+    unavailable — the detection is then simply inert)."""
+    clock = getattr(time, "CLOCK_BOOTTIME", None)   # Linux-only
+    if clock is None:
+        return 0.0
+    try:
+        return time.clock_gettime(clock) - time.monotonic()
+    except OSError:
+        return 0.0
 
 
 def _read_uevent(path: str, sysfs_root: str) -> str:
@@ -65,13 +84,18 @@ class HidrawMonitor(_HotplugMonitor):
     node path whenever its controller reports genuine input."""
 
     PATTERN = "/dev/hidraw*"
-    WATCH_DIR = b"/dev/hidraw"
+    # hidraw nodes live directly in /dev (there is no /dev/hidraw directory —
+    # watching that path used to fail silently, losing inotify hotplug), so
+    # watch /dev and filter events down to hidraw* names.
+    WATCH_DIR = b"/dev"
+    WATCH_PREFIX = b"hidraw"
     LABEL = "hidraw"
     READ_SIZE = 256           # a single HID report; SC reports are <=64 bytes
 
     def __init__(self, callback: Callable[[str], None]):
         super().__init__(callback)
         self._detectors: dict[str, SteamControllerActivity] = {}
+        self._suspend_epoch = _boottime_delta()
 
     def _accept(self, path: str, fd: int) -> bool:
         if hidraw_vendor(path) != VALVE_VID:
@@ -85,6 +109,12 @@ class HidrawMonitor(_HotplugMonitor):
         super()._close_device(path)
 
     def _handle(self, path: str, fd: int, data: bytes) -> None:
+        delta = _boottime_delta()
+        if delta - self._suspend_epoch > SUSPEND_JUMP:
+            self._suspend_epoch = delta
+            log.info("resume detected — resetting Steam controller detectors")
+            for p in self._detectors:
+                self._detectors[p] = SteamControllerActivity()
         detector = self._detectors.get(path)
         if detector is None:
             return
