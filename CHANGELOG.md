@@ -5,7 +5,25 @@ to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+- **Wake-on-input now works on QuickStart+ TVs.** The wake gate was a bare TCP
+  probe of the API port — but TVs with QuickStart+ (e.g. 2025 OLEDs) keep port
+  3001 accepting in Active Standby, so a remote-control power-off read as "TV is
+  on" and key presses never woke it. The daemon now asks each TV for its real
+  power state (`getPowerState` over a short-lived probe session, 3 s budget) and
+  powers on only TVs that aren't `Active` — so it still never touches a TV that
+  is showing another input or app. A rejected pairing key suppresses waking
+  (each register would pop an on-screen pairing prompt) and logs a re-pair hint.
+  Note: with `persistent_connection: "off"`, a key press while the TV is on now
+  opens a brief probe session at most once per cooldown window.
+
+### Changed
+- **Steam Controller input can now power on a fully-off TV** — new
+  `steam_controller.wake` knob, **on by default** (matching keyboard
+  wake-on-input). The hidraw detector can't tell buttons from stick movement, so
+  any genuine controller input wakes an off TV; restore the old unblank-only
+  behavior with `lgtvc setup steam-controller --wake off` (or the tray
+  checkbox).
 
 ## [0.2.6] — 2026-09-15
 

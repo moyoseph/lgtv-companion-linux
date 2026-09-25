@@ -42,14 +42,16 @@ def _load_ignored_keys() -> set[int]:
     return parse_ignored_keys(cfg.global_.idle.ignored_keys)
 
 
-def _steam_controller_enabled() -> bool:
+def _steam_controller_config() -> config_mod.SteamControllerConfig:
+    """Best-effort load; dataclass defaults (enabled + wake) when the config is
+    missing or unreadable."""
     path = config_mod.find_config()
-    if path is None:
-        return True   # default-on (SteamControllerConfig.enabled)
-    try:
-        return config_mod.load(path).global_.steam_controller.enabled
-    except (ValueError, OSError):
-        return True
+    if path is not None:
+        try:
+            return config_mod.load(path).global_.steam_controller
+        except (ValueError, OSError):
+            pass
+    return config_mod.SteamControllerConfig()
 
 
 class Agent:
@@ -62,8 +64,9 @@ class Agent:
         self._monitor = InputMonitor(self._on_input)
         # In gamescope the Steam client claims the controller over hidraw, so it
         # emits no evdev events; read it directly to keep the TV awake there.
-        self._sc_monitor = (HidrawMonitor(self._on_sc_input)
-                            if _steam_controller_enabled() else None)
+        sc = _steam_controller_config()
+        self._sc_monitor = HidrawMonitor(self._on_sc_input) if sc.enabled else None
+        self._sc_wake = sc.wake
         self._send_queue: asyncio.Queue[dict] = asyncio.Queue(maxsize=16)
         self._state: dict = {"mpris_playing": False, "fullscreen": None}
         # streaming is the OR of all sources (sunshine log + process watch); the
@@ -82,14 +85,15 @@ class Agent:
             self._send_queue.put_nowait({"activity": True, "key": etype == EV_KEY})
 
     def _on_sc_input(self, path: str) -> None:
-        # Steam-controller input over hidraw: unblank only (key=False), never
-        # power on a fully-off TV. Throttled like _on_input.
+        # Steam-controller input over hidraw. With steam_controller.wake (the
+        # default) it counts as a key press so the daemon may power on a fully
+        # off TV; wake=false keeps it unblank-only. Throttled like _on_input.
         now = time.monotonic()
         if now - self._last_sc_report < INPUT_REPORT_INTERVAL:
             return
         self._last_sc_report = now
         with contextlib.suppress(asyncio.QueueFull):
-            self._send_queue.put_nowait({"activity": True, "key": False})
+            self._send_queue.put_nowait({"activity": True, "key": self._sc_wake})
 
     async def _state_loop(self) -> None:
         from dbus_fast import BusType

@@ -106,11 +106,70 @@ async def test_keepalive_loop_refreshes_power_state(tv, tmp_path, monkeypatch):
     await s.disconnect()
 
 
-async def test_is_reachable_false_when_nothing_listens(tmp_path):
+# -- probe_power_state (the wake-on-input gate) ---------------------------------
+
+async def test_probe_connected_returns_live_state(tv, tmp_path):
+    tv.power_state = "Active"
+    s = make_session(tv, tmp_path)
+    await s.connect()
+    s.power_state = "Unknown"                   # stale cache -> refreshed live
+    assert await s.probe_power_state() == "Active"
+    assert s.power_state == "Active"
+    await s.disconnect()
+
+
+async def test_probe_connected_error_closes_and_unreachable(tv, tmp_path):
+    from lgtvcompanion.ssap.power import URI_GET_POWER_STATE
+    tv.close_uris = {URI_GET_POWER_STATE}       # socket dies mid-request
+    s = make_session(tv, tmp_path)
+    await s.connect()
+    assert await s.probe_power_state() == "Unreachable"
+    assert s.power_state == "Unknown"
+    assert s.client.connected is False
+
+
+async def test_probe_disconnected_standby_tv(tv, tmp_path):
+    # register succeeds, TV reports Active Standby; the throwaway client must
+    # not leave the session connected
+    tv.power_state = "Active Standby"
+    s = make_session(tv, tmp_path)
+    assert await s.probe_power_state() == "Active Standby"
+    assert s.power_state == "Active Standby"
+    assert s.client.connected is False
+
+
+async def test_probe_disconnected_standby_register_rejection(tv, tmp_path):
+    # the B4/QuickStart+ signature: TCP accepts, register is closed with 1008
+    # "Try Again Later (EWS)" — must read as Unreachable (wakeable), which is
+    # exactly what the old TCP-reachability gate got wrong
+    tv.close_on_register = True
+    s = make_session(tv, tmp_path)
+    assert await s.probe_power_state() == "Unreachable"
+
+
+async def test_probe_dead_port_is_unreachable(tmp_path):
     store = KeyStore(tmp_path / "keys")
-    cfg = DeviceConfig(id="tv1", host="127.0.0.1", ssl=True)  # :3001, nothing there
+    store.save("tv1", VALID_KEY)
+    cfg = DeviceConfig(id="tv1", host="127.0.0.1", ssl=False, timeout=0.3)
+    s = DeviceSession(cfg, store)               # nothing listening
+    assert await s.probe_power_state(timeout=0.3) == "Unreachable"
+
+
+async def test_probe_stale_key_is_keyrejected(tv, tmp_path):
+    store = KeyStore(tmp_path / "keys")
+    store.save("tv1", "stale-key")              # TV will PROMPT -> KeyRejected
+    cfg = DeviceConfig(id="tv1", host="127.0.0.1", ssl=False, timeout=3.0)
     s = DeviceSession(cfg, store)
-    assert await s.is_reachable(timeout=0.3) is False
+    s.client.port = tv.port
+    orig = s._new_client
+
+    def patched(**kw):
+        c = orig(**kw)
+        c.port = tv.port
+        return c
+
+    s._new_client = patched
+    assert await s.probe_power_state() == "KeyRejected"
 
 
 # -- connection edge branches ---------------------------------------------------
@@ -200,26 +259,13 @@ async def test_blank_unreachable_is_already_off(tmp_path):
     assert await s.blank() == "already-off"
 
 
-async def test_is_reachable_true_with_listener(tmp_path):
-    import contextlib
-    import pytest
-    # is_reachable connects to the fixed LG port (3001 for ssl); bind it if free
-    async def handler(reader, writer):
-        writer.close()
-
-    try:
-        server = await asyncio.start_server(handler, "127.0.0.1", 3001)
-    except OSError:
-        pytest.skip("port 3001 unavailable")
-    try:
-        store = KeyStore(tmp_path / "keys")
-        cfg = DeviceConfig(id="tv1", host="127.0.0.1", ssl=True)
-        s = DeviceSession(cfg, store)
-        assert await s.is_reachable(timeout=1.0) is True
-    finally:
-        server.close()
-        with contextlib.suppress(Exception):
-            await server.wait_closed()
+async def test_probe_active_tv_means_no_wake(tv, tmp_path):
+    # a TV that is genuinely on (any app/source) probes Active — the daemon
+    # must leave it alone
+    tv.power_state = "Active"
+    s = make_session(tv, tmp_path)
+    assert await s.probe_power_state() == "Active"
+    assert s.client.connected is False          # throwaway closed
 
 
 # -- execute dispatch branches --------------------------------------------------

@@ -155,10 +155,12 @@ def test_settings_collect_parses_widgets(qapp, monkeypatch, tmp_path):
     dev = dlg.device_widgets[0]
     dev[3].setText("aa:bb:cc:dd:ee:ff, 11:22:33:44:55:66")   # mac field
     dev[5].setValue(0)                                        # hdmi -> None sentinel
+    dlg.steam_controller_wake.setChecked(False)
     dlg._collect()
     g = dlg.cfg.global_
     assert g.idle.minutes == 7
     assert g.remote_stream.processes == ["parsec*", "moonlight*"]
+    assert g.steam_controller.wake is False
     assert dlg.cfg.devices[0].mac == ["aa:bb:cc:dd:ee:ff", "11:22:33:44:55:66"]
     assert dlg.cfg.devices[0].source_hdmi_input is None
 

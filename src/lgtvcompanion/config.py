@@ -63,6 +63,11 @@ class SteamControllerConfig:
     # so it emits no evdev events; the agent reads /dev/hidraw* directly to keep
     # the TV awake. Inert on any system without a Valve (28de) controller.
     enabled: bool = True
+    # Controller input may also power ON a fully-off TV (reported to the daemon
+    # as a key press). The hidraw detector can't tell buttons from stick
+    # movement, so ANY genuine controller input wakes an off TV — set False to
+    # keep the controller unblank-only.
+    wake: bool = True
 
 
 @dataclass

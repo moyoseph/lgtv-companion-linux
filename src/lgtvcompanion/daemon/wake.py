@@ -1,8 +1,11 @@
 """Wake the TV on keyboard input while the PC is on but the TV is off.
 
-Port of the proven tv-wake-on-input daemon: any EV_KEY press → if the TV's
-API port is unreachable (TV off / network-asleep), run the power-on sequence.
-No-op when the TV is already on, so it never yanks another HDMI source.
+Port of the proven tv-wake-on-input daemon, upgraded: any EV_KEY press →
+`wake_if_needed`, which probes each TV's real power state and powers on the
+ones that aren't Active (see Daemon._wake_if_tv_off). The old TCP-reachability
+gate lived here, but QuickStart+ TVs keep the API port open in standby, so
+"reachable" could not distinguish on from off. This class is now just the
+input-side debouncer: cooldown + single-flight.
 """
 
 from __future__ import annotations
@@ -21,12 +24,10 @@ class WakeOnInput:
     def __init__(
         self,
         *,
-        is_tv_reachable: Callable[[], Awaitable[bool]],
-        wake: Callable[[], Awaitable[None]],
+        wake_if_needed: Callable[[str], Awaitable[None]],
         cooldown_s: float = 15.0,
     ):
-        self.is_tv_reachable = is_tv_reachable
-        self.wake = wake
+        self.wake_if_needed = wake_if_needed
         self.cooldown_s = cooldown_s
         self._monitor = InputMonitor(self._on_event)
         self._last_attempt = 0.0
@@ -56,10 +57,7 @@ class WakeOnInput:
     async def _maybe_wake(self, source: str) -> None:
         self._busy = True
         try:
-            if await self.is_tv_reachable():
-                return
-            log.info("key press on %s while TV unreachable — waking TV", source)
-            await self.wake()
+            await self.wake_if_needed(source)
         except Exception:
             log.exception("wake-on-input failed")
         finally:

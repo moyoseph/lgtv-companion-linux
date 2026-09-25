@@ -27,10 +27,11 @@ def short_sock() -> str:
 
 class FakeSession:
     """Daemon-facing DeviceSession stub: records calls, returns the strings the
-    daemon expects; knobs for reachability, busy, and per-method failure."""
+    daemon expects; knobs for the probed power state, busy, and per-method
+    failure."""
 
     def __init__(self, id_: str, key: str | None = None, *,
-                 host: str = "127.0.0.1", reachable: bool = True,
+                 host: str = "127.0.0.1", probe_state: str = "Active",
                  fail: tuple[str, ...] = ()):
         self.cfg = SimpleNamespace(id=id_, name=id_, unique_display_key=key,
                                    host=host, source_hdmi_input=4)
@@ -38,7 +39,7 @@ class FakeSession:
         self.busy = False
         self.power_state = "Unknown"
         self.client = SimpleNamespace(connected=False)
-        self.reachable = reachable
+        self.probe_state = probe_state
         self.calls: list = []
         self._fail = set(fail)
 
@@ -63,8 +64,9 @@ class FakeSession:
         self._record("on")
         return "Active"
 
-    async def is_reachable(self, timeout: float = 1.0) -> bool:
-        return self.reachable
+    async def probe_power_state(self, *, timeout: float = 3.0) -> str:
+        self._record("probe")
+        return self.probe_state
 
     async def execute(self, cmd, args):
         self.calls.append((cmd.name, list(args)))
@@ -99,8 +101,8 @@ def make_session(tv, tmp_path, **overrides) -> DeviceSession:
     session.client.port = tv.port
     orig = session._new_client
 
-    def patched():
-        c = orig()
+    def patched(**kw):
+        c = orig(**kw)
         c.port = tv.port
         return c
 

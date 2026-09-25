@@ -471,17 +471,36 @@ def test_steam_controller_subcommand_toggles(monkeypatch, tmp_path, capsys):
     config_mod.save(config_mod.Config(
         devices=[config_mod.DeviceConfig(id="tv1", host="h")]), cfg_path)
     monkeypatch.setattr(config_mod, "find_config", lambda: cfg_path)
-    setup_cmds.cmd_steam_controller(SimpleNamespace(state=None))
-    assert capsys.readouterr().out.strip() == "on"       # default on
-    setup_cmds.cmd_steam_controller(SimpleNamespace(state="off"))
+    setup_cmds.cmd_steam_controller(SimpleNamespace(state=None, wake=None))
+    out = capsys.readouterr().out.splitlines()
+    assert out[0] == "on"                                # bare state first (scripts)
+    assert out[1] == "wake = on"                         # both default on
+    setup_cmds.cmd_steam_controller(SimpleNamespace(state="off", wake=None))
     assert "restart" in capsys.readouterr().out.lower()
     assert config_mod.load(cfg_path).global_.steam_controller.enabled is False
+
+
+def test_steam_controller_wake_flag(monkeypatch, tmp_path, capsys):
+    cfg_path = tmp_path / "config.json"
+    config_mod.save(config_mod.Config(
+        devices=[config_mod.DeviceConfig(id="tv1", host="h")]), cfg_path)
+    monkeypatch.setattr(config_mod, "find_config", lambda: cfg_path)
+    setup_cmds.cmd_steam_controller(SimpleNamespace(state=None, wake="off"))
+    out = capsys.readouterr().out
+    assert "steam_controller.wake = off" in out
+    saved = config_mod.load(cfg_path).global_.steam_controller
+    assert saved.wake is False
+    assert saved.enabled is True                         # untouched
+    # positional + --wake combined
+    setup_cmds.cmd_steam_controller(SimpleNamespace(state="off", wake="on"))
+    saved = config_mod.load(cfg_path).global_.steam_controller
+    assert (saved.enabled, saved.wake) == (False, True)
 
 
 def test_steam_controller_subcommand_no_config(monkeypatch):
     monkeypatch.setattr(config_mod, "find_config", lambda: None)
     with pytest.raises(SystemExit):
-        setup_cmds.cmd_steam_controller(SimpleNamespace(state="on"))
+        setup_cmds.cmd_steam_controller(SimpleNamespace(state="on", wake=None))
 
 
 def test_hidraw_scan_lists_nodes(monkeypatch, capsys):
