@@ -5,7 +5,18 @@ to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-_Nothing yet._
+### Fixed
+- **Controller input from a game stream no longer turns the TV on.** Streaming
+  hosts inject the remote client's gamepad on the box as a virtual device —
+  Punktfunk emulates it as a Valve Steam Deck / Steam Controller 2 over UHID or
+  usbip, with the same `28DE` vendor ID as a real Steam Controller. The hidraw
+  monitor matched it as the couch controller and (with `steam_controller.wake`)
+  woke the TV mid-stream; its evdev events counted as key presses too. Devices
+  are now classified by sysfs origin (`/sys/devices/virtual/…` or `vhci_hcd` =
+  injected): virtual Valve hidraw nodes are skipped, and virtual evdev input
+  still counts as activity but never as a wake. Wake-on-input is also
+  suspended while a remote stream is connected. `lgtvc setup hidraw-scan` marks
+  virtual pads. Docs gain Punktfunk `session.started`/`session.ended` hooks.
 
 ## [0.2.7] — 2026-09-25
 

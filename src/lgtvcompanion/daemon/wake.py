@@ -42,6 +42,8 @@ class WakeOnInput:
     def _on_event(self, path: str, etype: int, code: int, value: int) -> None:
         if etype != EV_KEY or value != KEY_PRESS:
             return
+        if path in self._monitor.synthetic:   # injected (stream client) input
+            return
         self.notify_input(path)
 
     def notify_input(self, source: str = "agent") -> None:

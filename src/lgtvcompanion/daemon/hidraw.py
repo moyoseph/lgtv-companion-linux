@@ -20,7 +20,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from ..steamcontroller import VALVE_VID, SteamControllerActivity
-from .inputdev import _HotplugMonitor
+from .inputdev import _HotplugMonitor, is_synthetic
 
 log = logging.getLogger(__name__)
 
@@ -92,13 +92,21 @@ class HidrawMonitor(_HotplugMonitor):
     LABEL = "hidraw"
     READ_SIZE = 256           # a single HID report; SC reports are <=64 bytes
 
-    def __init__(self, callback: Callable[[str], None]):
+    def __init__(self, callback: Callable[[str], None],
+                 sysfs_root: str = SYSFS_HIDRAW):
         super().__init__(callback)
+        self.sysfs_root = sysfs_root
         self._detectors: dict[str, SteamControllerActivity] = {}
         self._suspend_epoch = _boottime_delta()
 
     def _accept(self, path: str, fd: int) -> bool:
         if hidraw_vendor(path) != VALVE_VID:
+            return False
+        # Streaming hosts (Punktfunk) emulate the remote client's pad as a
+        # Valve Steam Deck / Controller over UHID or usbip — same 28DE vendor,
+        # but the person holding it is not at this TV.
+        if is_synthetic(path, self.sysfs_root):
+            log.info("skipping virtual Valve hidraw %s (emulated/streamed pad)", path)
             return False
         self._detectors[path] = SteamControllerActivity()
         log.info("watching Steam controller hidraw %s", path)

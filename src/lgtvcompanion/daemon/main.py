@@ -110,8 +110,11 @@ class Daemon:
                 self.idle_engine.notify_activity()
             # only key presses wake an off TV; pointer noise shouldn't. Skip if
             # a power operation is already in flight, else a slow/failing wake
-            # keeps re-triggering (the TV reads "unreachable" mid-connect).
+            # keeps re-triggering (the TV reads "unreachable" mid-connect), and
+            # while a remote stream is live — that input is the stream client's,
+            # the panel is dark on purpose.
             if (report.get("key", True) and self.wake_on_input is not None
+                    and not self.streams.streaming
                     and not any(s.busy for s in self.sessions)):
                 self.wake_on_input.notify_input()
 

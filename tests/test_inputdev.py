@@ -377,3 +377,45 @@ async def test_setup_inotify_real_watch():
         assert m._inotify_fd is not None
     finally:
         m.stop()
+
+
+# --- is_synthetic / virtual-device tagging ------------------------------------
+
+def _sysfs_node(root, name, target):
+    """Fake /sys/class/<cls>/<name>/device -> <root>/sys/devices/<target>."""
+    real = root / "sys" / "devices" / target
+    real.mkdir(parents=True)
+    node = root / "class" / name
+    node.mkdir(parents=True)
+    (node / "device").symlink_to(real)
+    return str(root / "class")
+
+
+@pytest.mark.parametrize("target,expected", [
+    ("pci0000:00/0000:0a:00.0/usb1/1-5/1-5:1.2/input/input8", False),  # real USB
+    ("virtual/input/input32", True),                                   # uinput
+    ("virtual/misc/uhid/0003:28DE:1205.0009/input/input40", True),      # UHID pad
+    ("platform/vhci_hcd.0/usb3/3-1/3-1:1.0/input/input41", True),       # usbip
+])
+def test_is_synthetic_classifies_by_sysfs_path(tmp_path, target, expected):
+    cls = _sysfs_node(tmp_path, "event7", target)
+    assert idev.is_synthetic("/dev/input/event7", cls) is expected
+
+
+def test_is_synthetic_unknown_node_is_physical(tmp_path):
+    assert idev.is_synthetic("/dev/input/event99", str(tmp_path)) is False
+
+
+def test_input_monitor_tags_synthetic_until_closed(monkeypatch, tmp_path):
+    monkeypatch.setattr(idev, "is_accelerometer", lambda fd: False)
+    cls = _sysfs_node(tmp_path, "event4", "virtual/input/input4")
+    m = idev.InputMonitor(lambda *a: None, sysfs_root=cls)
+    r, w = os.pipe()
+    try:
+        assert m._accept("/dev/input/event4", r) is True   # still watched
+        assert m.synthetic == {"/dev/input/event4"}
+        m._fds["/dev/input/event4"] = r
+        m._close_device("/dev/input/event4")
+        assert m.synthetic == set()
+    finally:
+        os.close(w)

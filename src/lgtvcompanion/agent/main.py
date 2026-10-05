@@ -82,7 +82,10 @@ class Agent:
             return
         self._last_input_report = now
         with contextlib.suppress(asyncio.QueueFull):
-            self._send_queue.put_nowait({"activity": True, "key": etype == EV_KEY})
+            # injected devices (a stream client's pad/keyboard) keep the session
+            # active but never count as a key press — they must not wake the TV
+            key = etype == EV_KEY and path not in self._monitor.synthetic
+            self._send_queue.put_nowait({"activity": True, "key": key})
 
     def _on_sc_input(self, path: str) -> None:
         # Steam-controller input over hidraw. With steam_controller.wake (the

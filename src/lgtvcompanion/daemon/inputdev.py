@@ -41,6 +41,22 @@ RESCAN_FALLBACK_INTERVAL = 45.0
 
 INPUT_PROP_ACCELEROMETER = 0x06
 
+SYSFS_INPUT = "/sys/class/input"
+
+
+def is_synthetic(path: str, sysfs_class: str) -> bool:
+    """Whether a /dev node is backed by a software-injected device rather than
+    physical hardware: uinput and UHID devices live under /sys/devices/virtual/,
+    usbip-emulated USB hangs off vhci_hcd. Game-streaming hosts (Punktfunk,
+    Sunshine, Steam Remote Play) inject the remote client's controller/keyboard
+    exactly this way — that input comes from another room, so it must never be
+    mistaken for someone at the TV. Unknown/unresolvable → False (physical)."""
+    link = os.path.join(sysfs_class, os.path.basename(path), "device")
+    if not os.path.exists(link):
+        return False
+    real = os.path.realpath(link)
+    return "/devices/virtual/" in real or "vhci_hcd" in real
+
 
 def _ioc(direction: int, nr: int, size: int) -> int:
     return (direction << 30) | (size << 16) | (ord("E") << 8) | nr
@@ -239,14 +255,28 @@ class InputMonitor(_HotplugMonitor):
     LABEL = "input"
     READ_SIZE = EVENT_SIZE * 64
 
-    def __init__(self, callback: Callable[[str, int, int, int], None]):
+    def __init__(self, callback: Callable[[str, int, int, int], None],
+                 sysfs_root: str = SYSFS_INPUT):
         super().__init__(callback)
+        self.sysfs_root = sysfs_root
+        # open nodes backed by injected (uinput/UHID/usbip) devices — callers
+        # treat their events as activity, never as someone at the TV
+        self.synthetic: set[str] = set()
 
     def _accept(self, path: str, fd: int) -> bool:
         if is_accelerometer(fd):
             log.debug("%s: accelerometer, skipped", path)
             return False
+        if is_synthetic(path, self.sysfs_root):
+            self.synthetic.add(path)
+            log.info("%s: virtual (injected) input device", path)
+        else:
+            self.synthetic.discard(path)
         return True
+
+    def _close_device(self, path: str) -> None:
+        self.synthetic.discard(path)
+        super()._close_device(path)
 
     def _handle(self, path: str, fd: int, data: bytes) -> None:
         for off in range(0, len(data) - EVENT_SIZE + 1, EVENT_SIZE):

@@ -519,6 +519,21 @@ def test_hidraw_scan_lists_nodes(monkeypatch, capsys):
     assert "--seconds" in out                          # hint to capture
 
 
+def test_hidraw_scan_marks_virtual_valve_pad(monkeypatch, capsys):
+    from lgtvcompanion.cli import setup_cmds as sc
+    from lgtvcompanion.daemon import hidraw as hraw
+    from lgtvcompanion.daemon import inputdev as idev
+    monkeypatch.setattr("glob.glob", lambda pat: ["/dev/hidraw8"])
+    monkeypatch.setattr(sc.os, "access", lambda p, mode: True)
+    monkeypatch.setattr(hraw, "hidraw_info",
+                        lambda p: (0x28DE, 0x1205, "Steam Deck Controller"))
+    monkeypatch.setattr(idev, "is_synthetic", lambda p, root: True)
+    assert sc.cmd_hidraw_scan(SimpleNamespace(seconds=0.0)) == 0
+    out = capsys.readouterr().out
+    assert "virtual" in out
+    assert "no readable Valve" in out        # not offered for capture
+
+
 def test_hidraw_scan_no_nodes(monkeypatch, capsys):
     from lgtvcompanion.cli import setup_cmds as sc
     monkeypatch.setattr("glob.glob", lambda pat: [])

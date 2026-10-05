@@ -557,7 +557,8 @@ def cmd_hidraw_scan(args: argparse.Namespace) -> int:
     show which bytes move."""
     import glob as globmod
 
-    from ..daemon.hidraw import VALVE_VID, hidraw_info
+    from ..daemon.hidraw import SYSFS_HIDRAW, VALVE_VID, hidraw_info
+    from ..daemon.inputdev import is_synthetic
 
     nodes = sorted(globmod.glob("/dev/hidraw*"))
     if not nodes:
@@ -569,10 +570,12 @@ def cmd_hidraw_scan(args: argparse.Namespace) -> int:
         vidpid = (f"{vid:04x}:{pid:04x}" if vid is not None and pid is not None
                   else "?")
         readable = os.access(path, os.R_OK)
-        mark = "  <- Valve" if vid == VALVE_VID else ""
+        virtual = vid == VALVE_VID and is_synthetic(path, SYSFS_HIDRAW)
+        mark = ("  <- Valve (virtual: emulated/streamed pad, ignored)" if virtual
+                else "  <- Valve" if vid == VALVE_VID else "")
         print(f"{path}  {vidpid}  "
               f"{'readable' if readable else 'NO READ ACCESS'}  {name}{mark}")
-        if vid == VALVE_VID and readable:
+        if vid == VALVE_VID and readable and not virtual:
             valve.append(path)
     if not valve:
         print("\nno readable Valve (28de) controller found — if you have one, "

@@ -203,3 +203,16 @@ def test_close_device_drops_detector():
     assert "/dev/hidraw0" not in m._detectors
     assert "/dev/hidraw0" not in m._fds
     os.close(w)
+
+
+def test_accept_skips_virtual_valve_pad(monkeypatch, tmp_path):
+    # Punktfunk emulates the stream client's pad as a Valve Steam Deck over
+    # UHID — same vendor as the couch controller, but it must not be watched.
+    real = tmp_path / "sys" / "devices" / "virtual" / "misc" / "uhid" / "0003:28DE:1205.0009"
+    real.mkdir(parents=True)
+    (tmp_path / "class" / "hidraw8").mkdir(parents=True)
+    (tmp_path / "class" / "hidraw8" / "device").symlink_to(real)
+    monkeypatch.setattr(hraw, "hidraw_vendor", lambda p: VALVE_VID)
+    m = hraw.HidrawMonitor(lambda path: None, sysfs_root=str(tmp_path / "class"))
+    assert m._accept("/dev/hidraw8", 3) is False
+    assert m._detectors == {}
