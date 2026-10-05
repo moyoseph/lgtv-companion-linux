@@ -104,6 +104,15 @@ def test_mouse_motion_debounced_then_reports(monkeypatch, tmp_path):
     assert a._send_queue.get_nowait() == {"activity": True, "key": False}
 
 
+def test_key_from_virtual_device_is_activity_not_wake(monkeypatch, tmp_path):
+    # a stream client's injected pad/keyboard keeps the session active but must
+    # never wake the TV
+    a = _agent(monkeypatch, tmp_path)
+    a._monitor.synthetic.add("/dev/input/event18")
+    a._on_input("/dev/input/event18", EV_KEY, 304, 1)
+    assert a._send_queue.get_nowait() == {"activity": True, "key": False}
+
+
 # -- _on_sc_input (Steam Controller via hidraw) -------------------------------
 
 def test_sc_input_wakes_by_default(monkeypatch, tmp_path):

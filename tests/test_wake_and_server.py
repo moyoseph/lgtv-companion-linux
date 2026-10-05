@@ -61,6 +61,15 @@ def test_on_event_only_reacts_to_key_press():
     assert seen == ["/dev/input/event0"]
 
 
+def test_on_event_ignores_virtual_devices():
+    seen: list = []
+    w = WakeOnInput(wake_if_needed=None, cooldown_s=0.0)
+    w.notify_input = lambda src="agent": seen.append(src)   # type: ignore[method-assign]
+    w._monitor.synthetic.add("/dev/input/event18")
+    w._on_event("/dev/input/event18", EV_KEY, 304, KEY_PRESS)
+    assert seen == []
+
+
 # -- IpcServer ----------------------------------------------------------------
 
 

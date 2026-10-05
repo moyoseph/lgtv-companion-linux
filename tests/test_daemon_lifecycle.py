@@ -119,6 +119,16 @@ async def test_no_wake_when_tv_active(tmp_path):
     assert d.sessions[0].calls == ["probe"]     # probed, never powered on
 
 
+async def test_no_wake_while_streaming(tmp_path):
+    # during a remote stream the key presses are the stream client's — the TV
+    # is dark on purpose and must not be probed or powered on
+    d = _wake_daemon(tmp_path, FakeSession("tv1", probe_state="Unreachable"))
+    d.streams.streaming = True
+    d._on_report({"activity": True, "key": True})
+    await asyncio.sleep(0.05)
+    assert d.sessions[0].calls == []
+
+
 async def test_no_wake_on_rejected_pairing_key(tmp_path):
     # Waking would loop on KeyRejected and pop pairing prompts on-screen.
     d = _wake_daemon(tmp_path, FakeSession("tv1", probe_state="KeyRejected"))

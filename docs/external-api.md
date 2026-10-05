@@ -25,6 +25,20 @@ off/blanked. Three ways to drive that:
   lgtvc -streaming_disconnect   # restore per remote_stream.on_disconnect
   ```
   (`on_disconnect` = `on` | `keep_off` | `restore`.)
+- **Punktfunk** — its host is always running, so wire its session hooks in
+  `~/.config/punktfunk/hooks.json`:
+  ```json
+  {"on": "session.started", "run": "lgtvc -streaming_connect"},
+  {"on": "session.ended",   "run": "lgtvc -streaming_disconnect"}
+  ```
+
+While a stream is connected, wake-on-input is suspended — key presses then
+belong to the stream client, not someone at the TV. Independently of stream
+detection, input from **virtual devices** (uinput / UHID / usbip — how
+streaming hosts inject the client's controller and keyboard, including
+Punktfunk's emulated Steam Deck pad) counts as activity but never wakes the TV,
+and virtual Valve pads are ignored by the Steam Controller monitor
+(`lgtvc setup hidraw-scan` marks them).
 
 ## Subscribe to events
 
