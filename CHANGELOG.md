@@ -5,6 +5,10 @@ to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [0.2.8] — 2026-10-06
+
 ### Fixed
 - **Controller input from a game stream no longer turns the TV on.** Streaming
   hosts inject the remote client's gamepad on the box as a virtual device —
